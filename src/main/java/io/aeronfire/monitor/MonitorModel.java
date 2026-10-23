@@ -19,6 +19,10 @@ import java.util.Deque;
  */
 public final class MonitorModel
 {
+    private final boolean[] clusterRisk = new boolean[Instruments.COUNT];
+    private final double[] clusterMark = new double[Instruments.COUNT];
+    private final double[] clusterCs01 = new double[Instruments.COUNT];
+    private final double[] clusterDv01 = new double[Instruments.COUNT];
     static final int RECENT_EVENTS = 30;
     private static final DateTimeFormatter TIME =
         DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
@@ -111,6 +115,21 @@ public final class MonitorModel
         }
     }
 
+    /**
+     * Risk as computed by the cluster after each trade; preferred over the local estimate below.
+     */
+    void onRisk(final int instrumentId, final long net, final double mark, final double cs01, final double dv01)
+    {
+        if (Instruments.isValid(instrumentId))
+        {
+            positions[instrumentId] = net;
+            clusterRisk[instrumentId] = true;
+            clusterMark[instrumentId] = mark;
+            clusterCs01[instrumentId] = cs01;
+            clusterDv01[instrumentId] = dv01;
+        }
+    }
+
     void onPosition(final int instrumentId, final long net)
     {
         if (Instruments.isValid(instrumentId))
@@ -172,11 +191,28 @@ public final class MonitorModel
 
     double cs01(final int instrumentId)
     {
+        if (clusterRisk[instrumentId])
+        {
+            return clusterCs01[instrumentId];
+        }
         return pricer.cs01(instrumentId, Instruments.baseSpreadBps(instrumentId), positions[instrumentId]);
+    }
+
+    double dv01(final int instrumentId)
+    {
+        if (clusterRisk[instrumentId])
+        {
+            return clusterDv01[instrumentId];
+        }
+        return pricer.dv01(instrumentId, Instruments.baseSpreadBps(instrumentId), positions[instrumentId]);
     }
 
     double markValue(final int instrumentId)
     {
+        if (clusterRisk[instrumentId])
+        {
+            return clusterMark[instrumentId];
+        }
         return pricer.price(instrumentId, Instruments.baseSpreadBps(instrumentId)) / 100.0 * positions[instrumentId];
     }
 
@@ -246,10 +282,12 @@ public final class MonitorModel
 
         sb.append("\"positions\":[");
         double totalCs01 = 0;
+        double totalDv01 = 0;
         for (int i = 0; i < Instruments.COUNT; i++)
         {
             final double cs01 = cs01(i);
             totalCs01 += cs01;
+            totalDv01 += dv01(i);
             sb.append(i == 0 ? "" : ",")
                 .append("{\"id\":").append(i)
                 .append(",\"name\":\"").append(Instruments.name(i)).append('"')
@@ -257,9 +295,11 @@ public final class MonitorModel
                 .append(",\"halted\":").append(halted[i])
                 .append(",\"mark\":").append(round(markValue(i), 0))
                 .append(",\"cs01\":").append(round(cs01, 0))
+                .append(",\"dv01\":").append(round(dv01(i), 0))
                 .append('}');
         }
-        sb.append("],\"totalCs01\":").append(round(totalCs01, 0)).append(',');
+        sb.append("],\"totalCs01\":").append(round(totalCs01, 0))
+            .append(",\"totalDv01\":").append(round(totalDv01, 0)).append(',');
 
         sb.append("\"credit\":[");
         first = true;

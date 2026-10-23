@@ -76,12 +76,13 @@
     <div class="kpi"><div class="label">Traded</div><div class="value" id="traded">0</div><div class="rate">gross notional</div></div>
     <div class="kpi"><div class="label">Rejects</div><div class="value" id="rejects">0</div><div class="rate">credit · tier · other</div></div>
     <div class="kpi"><div class="label">Book CS01</div><div class="value" id="cs01">0</div><div class="rate">P&amp;L if spreads widen 1bp</div></div>
+    <div class="kpi"><div class="label">Book DV01</div><div class="value" id="dv01">0</div><div class="rate">P&amp;L if rates rise 1bp</div></div>
   </section>
 
   <section class="positions">
     <h2>Positions &amp; risk</h2>
     <div class="scroll"><table>
-      <thead><tr><th>Loan</th><th class="num">Net</th><th class="num">Mark</th><th class="num" title="P&amp;L if spreads widen 1bp">CS01</th></tr></thead>
+      <thead><tr><th>Loan</th><th class="num">Net</th><th class="num">Mark</th><th class="num" title="P&amp;L if spreads widen 1bp">CS01</th><th class="num" title="P&amp;L if rates rise 1bp">DV01</th></tr></thead>
       <tbody id="positions"></tbody>
     </table></div>
     <div class="reasons" id="reasons"></div>
@@ -128,12 +129,13 @@
     $('traded').textContent = mm(f.tradedNotional);
     $('rejects').textContent = f.rejects.toLocaleString('en-GB');
     $('cs01').innerHTML = signed(s.totalCs01, money(s.totalCs01));
+    $('dv01').innerHTML = signed(s.totalDv01, money(s.totalDv01));
     $('reasons').textContent = Object.entries(f.rejectsByReason).map(([k, v]) => `${k} ${v}`).join('   ');
 
     $('positions').innerHTML = s.positions.map(p =>
       `<tr><td>${p.name}${p.halted ? '<span class="flag bad">HALTED</span>' : ''}</td><td class="num">${signed(p.net, mm(p.net))}</td>` +
-      `<td class="num">${money(p.mark)}</td><td class="num">${signed(p.cs01, money(p.cs01))}</td></tr>`).join('') +
-      `<tr class="total"><td>Total</td><td></td><td></td><td class="num">${signed(s.totalCs01, money(s.totalCs01))}</td></tr>`;
+      `<td class="num">${money(p.mark)}</td><td class="num">${signed(p.cs01, money(p.cs01))}</td><td class="num">${signed(p.dv01, money(p.dv01))}</td></tr>`).join('') +
+      `<tr class="total"><td>Total</td><td></td><td></td><td class="num">${signed(s.totalCs01, money(s.totalCs01))}</td><td class="num">${signed(s.totalDv01, money(s.totalDv01))}</td></tr>`;
 
     $('credit').innerHTML = s.credit.map(cl => {
       const u = cl.limit ? cl.utilised / cl.limit : 0;

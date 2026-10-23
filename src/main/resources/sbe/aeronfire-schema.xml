@@ -3,7 +3,7 @@
                    package="io.aeronfire.sbe"
                    id="701"
                    version="1"
-                   semanticVersion="0.6.0"
+                   semanticVersion="0.7.0"
                    description="aeronfire credit RFQ messages"
                    byteOrder="littleEndian">
     <types>
@@ -282,6 +282,17 @@
         <field name="quoteId" id="1" type="int64"/>
         <field name="rfqId" id="2" type="int64"/>
         <field name="clientId" id="3" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="RiskUpdate" id="44" description="Risk after a trade or position change: one instrument and the book totals, in currency">
+        <field name="instrumentId" id="1" type="int32"/>
+        <field name="netNotional" id="2" type="Notional"/>
+        <field name="mark" id="3" type="double"/>
+        <field name="cs01" id="4" type="double" description="P&amp;L for a 1bp widening of this instrument's spread"/>
+        <field name="dv01" id="5" type="double" description="P&amp;L for a 1bp rise in the benchmark rate"/>
+        <field name="bookCs01" id="6" type="double"/>
+        <field name="bookDv01" id="7" type="double"/>
+        <field name="bookMark" id="8" type="double"/>
     </sbe:message>
 
     <sbe:message name="AlgoControlsStatus" id="28" description="Current RTS 6 controls">

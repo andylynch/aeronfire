@@ -18,6 +18,7 @@ import io.aeronfire.sbe.CreditStatusDecoder;
 import io.aeronfire.sbe.MessageHeaderDecoder;
 import io.aeronfire.sbe.MessageHeaderEncoder;
 import io.aeronfire.sbe.PositionStatusDecoder;
+import io.aeronfire.sbe.RiskUpdateDecoder;
 import io.aeronfire.sbe.QuoteDecoder;
 import io.aeronfire.sbe.RejectDecoder;
 import io.aeronfire.sbe.RfqRequestDecoder;
@@ -50,6 +51,7 @@ public final class Monitor implements EgressListener
     private final CreditStatusDecoder creditStatus = new CreditStatusDecoder();
     private final PositionStatusDecoder positionStatus = new PositionStatusDecoder();
     private final InventoryStatusDecoder inventoryStatus = new InventoryStatusDecoder();
+    private final RiskUpdateDecoder riskUpdate = new RiskUpdateDecoder();
     private final AlgoControlsStatusDecoder algoStatus = new AlgoControlsStatusDecoder();
     private final ClientEligibilityStatusDecoder eligibilityStatus = new ClientEligibilityStatusDecoder();
     private final PendingChangeStatusDecoder pendingStatus = new PendingChangeStatusDecoder();
@@ -100,6 +102,12 @@ public final class Monitor implements EgressListener
             {
                 positionStatus.wrap(buffer, bodyOffset, blockLength, version);
                 model.onPosition(positionStatus.instrumentId(), positionStatus.netNotional());
+            }
+            case RiskUpdateDecoder.TEMPLATE_ID ->
+            {
+                riskUpdate.wrap(buffer, bodyOffset, blockLength, version);
+                model.onRisk(riskUpdate.instrumentId(), riskUpdate.netNotional(), riskUpdate.mark(), riskUpdate.cs01(),
+                    riskUpdate.dv01());
             }
             case InventoryStatusDecoder.TEMPLATE_ID ->
             {

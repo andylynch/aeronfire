@@ -72,4 +72,19 @@ class MonitorModelTest
         }
         assertEquals(10.0, meter.perSecond(4_000), 1e-9);
     }
+
+    @Test
+    void clusterRiskOverridesTheLocalEstimate()
+    {
+        final MonitorModel model = new MonitorModel();
+        model.onPosition(0, 10_000_000L);
+        final double local = model.cs01(0);
+        assertTrue(local < 0, "long credit loses when spreads widen");
+
+        model.onRisk(0, 10_000_000L, 9_900_000.0, -1234.5, -2345.6);
+        assertEquals(-1234.5, model.cs01(0), 1e-9);
+        assertEquals(-2345.6, model.dv01(0), 1e-9);
+        assertEquals(9_900_000.0, model.markValue(0), 1e-9);
+        assertEquals(0.0, model.cs01(1), 1e-9); // another instrument, no position, still the local estimate
+    }
 }

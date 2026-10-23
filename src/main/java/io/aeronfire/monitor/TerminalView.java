@@ -61,19 +61,22 @@ final class TerminalView
         }
         sb.append('\n');
 
-        sb.append(BOLD).append(String.format("%-28s %14s %14s %12s%n", "POSITIONS", "net", "mark", "CS01")).append(RESET)
-            .append(DIM).append("  CS01 = P&L if spreads widen 1bp").append(RESET).append('\n');
+        sb.append(BOLD).append(String.format("%-28s %14s %14s %12s %12s%n", "POSITIONS", "net", "mark", "CS01", "DV01")).append(RESET)
+            .append(DIM).append("  CS01 = P&L if spreads widen 1bp, DV01 = P&L if rates rise 1bp").append(RESET).append('\n');
         double totalCs01 = 0;
+        double totalDv01 = 0;
         for (int i = 0; i < Instruments.COUNT; i++)
         {
             final double cs01 = m.cs01(i);
             totalCs01 += cs01;
+            totalDv01 += m.dv01(i);
             final long net = m.positions[i];
             final String colour = net > 0 ? GREEN : net < 0 ? RED : DIM;
-            sb.append(String.format(Locale.ROOT, "  %-26s %s%14s%s %14s %12s%n",
-                Instruments.name(i), colour, mm(net), RESET, money(m.markValue(i)), money(cs01)));
+            sb.append(String.format(Locale.ROOT, "  %-26s %s%14s%s %14s %12s %12s%n",
+                Instruments.name(i), colour, mm(net), RESET, money(m.markValue(i)), money(cs01), money(m.dv01(i))));
         }
-        sb.append(String.format(Locale.ROOT, "  %-26s %14s %14s %s%12s%s%n%n", "total", "", "", BOLD, money(totalCs01), RESET));
+        sb.append(String.format(Locale.ROOT, "  %-26s %14s %14s %s%12s %12s%s%n%n", "total", "", "", BOLD, money(totalCs01),
+            money(totalDv01), RESET));
 
         sb.append(BOLD).append(String.format("%-10s %-5s %10s %10s  %-" + BAR_WIDTH + "s %7s%n",
             "CREDIT", "tier", "limit", "used", "utilisation", "trades")).append(RESET);

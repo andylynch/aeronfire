@@ -74,7 +74,12 @@ public final class Pricer
      */
     public double price(final int instrumentId, final int spreadBps)
     {
-        final double yield = (benchmarkRatePct + spreadBps / 100.0) / 100.0;
+        return price(instrumentId, spreadBps, benchmarkRatePct);
+    }
+
+    private double price(final int instrumentId, final int spreadBps, final double benchmarkPct)
+    {
+        final double yield = (benchmarkPct + spreadBps / 100.0) / 100.0;
         final double coupon = Instruments.couponPct(instrumentId);
         final int years = Instruments.maturityYears(instrumentId);
 
@@ -97,5 +102,24 @@ public final class Pricer
     {
         final double dPrice = price(instrumentId, spreadBps + 1) - price(instrumentId, spreadBps);
         return dPrice / 100.0 * netPosition;
+    }
+
+    /**
+     * Rate sensitivity: P&amp;L for a 1bp rise in the benchmark rate on the given position, in currency.
+     * Negative for a long.
+     */
+    public double dv01(final int instrumentId, final int spreadBps, final long netPosition)
+    {
+        final double dPrice = price(instrumentId, spreadBps, benchmarkRatePct + 0.01) -
+            price(instrumentId, spreadBps, benchmarkRatePct);
+        return dPrice / 100.0 * netPosition;
+    }
+
+    /**
+     * Value of the position at the instrument's base (mark) spread, in currency.
+     */
+    public double mark(final int instrumentId, final long netPosition)
+    {
+        return price(instrumentId, Instruments.baseSpreadBps(instrumentId)) / 100.0 * netPosition;
     }
 }

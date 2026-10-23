@@ -55,4 +55,23 @@ class PricerTest
         assertTrue(pricer.cs01(0, 450, 10_000_000L) < 0);
         assertTrue(pricer.cs01(0, 450, -10_000_000L) > 0);
     }
+
+    @Test
+    void dv01IsNegativeForLongAndSmallerThanDuration()
+    {
+        final double longDv01 = pricer.dv01(0, 450, 10_000_000L);
+        assertTrue(longDv01 < 0, "long loses when rates rise");
+        assertTrue(pricer.dv01(0, 450, -10_000_000L) > 0);
+        // A 5-year bond has roughly 4 years of modified duration: about 4bp of 10mm, i.e. 3-5k per bp.
+        assertTrue(longDv01 > -6_000 && longDv01 < -3_000, "dv01 " + longDv01);
+        // Same instrument, the spread and rate moves are equivalent for a discount-curve pricer.
+        assertEquals(pricer.cs01(0, 450, 10_000_000L), longDv01, 1e-6);
+    }
+
+    @Test
+    void markIsPositionTimesPrice()
+    {
+        assertEquals(pricer.price(0, io.aeronfire.domain.Instruments.baseSpreadBps(0)) / 100.0 * 5_000_000L,
+            pricer.mark(0, 5_000_000L), 1e-6);
+    }
 }

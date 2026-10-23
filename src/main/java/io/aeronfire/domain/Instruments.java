@@ -41,6 +41,16 @@ public final class Instruments
         return NAMES[instrumentId];
     }
 
+    /**
+     * Issuer name, the first word of the instrument name. This model has one bond per issuer, so risk "by
+     * issuer" and "by instrument" coincide; the field exists so a second bond per issuer aggregates correctly.
+     */
+    public static String issuer(final int instrumentId)
+    {
+        final String name = NAMES[instrumentId];
+        return name.substring(0, name.indexOf(' '));
+    }
+
     public static String isin(final int instrumentId)
     {
         return ISINS[instrumentId];

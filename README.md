@@ -197,6 +197,6 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Idempotent RFQ and accept: a resent RFQ id gets its existing quote back, a resent accept for a filled quote replays the original Trade (no second execution). The gateway resends both after a failover; verified: 100 in-flight RFQs resent, 0 timeouts.
 - [x] Quote expiry via cluster timers (one per quote, QuoteExpired egress, state released on every member; tested after a leader kill).
 - [ ] Aeron Archive replay to rebuild valuations and CS01 as of a past log position.
-- [ ] Risk egress: CS01 / DV01 by issuer on every trade.
+- [x] Risk egress: the cluster computes CS01 and DV01 (and mark) after every trade and position adjustment and pushes `RiskUpdate` to monitors, with book totals; the blotter shows them. One bond per issuer here, so by-issuer equals by-instrument; with this single-curve pricer DV01 equals CS01 numerically.
 - [ ] Latency report: HdrHistogram per hop, ZGC vs G1, bare metal vs cloud.
 - [ ] JMH benchmarks for the pricer and codecs.

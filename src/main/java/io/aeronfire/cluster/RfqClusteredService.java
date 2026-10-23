@@ -62,6 +62,7 @@ import io.aeronfire.sbe.PositionAdjustDecoder;
 import io.aeronfire.sbe.QuoteAcceptDecoder;
 import io.aeronfire.sbe.QuoteEncoder;
 import io.aeronfire.sbe.QuoteExpiredEncoder;
+import io.aeronfire.sbe.RiskUpdateEncoder;
 import io.aeronfire.sbe.RejectEncoder;
 import io.aeronfire.sbe.RejectReason;
 import io.aeronfire.sbe.RfqRequestDecoder;
@@ -184,6 +185,7 @@ public final class RfqClusteredService implements ClusteredService
     private long nextPendingId;
 
     private final QuoteExpiredEncoder quoteExpiredEncoder = new QuoteExpiredEncoder();
+    private final RiskUpdateEncoder riskEncoder = new RiskUpdateEncoder();
     private long quotesExpired; // diagnostic only
     private Cluster cluster;
     private IdleStrategy idleStrategy;
@@ -515,6 +517,7 @@ public final class RfqClusteredService implements ClusteredService
             .clientUtilised(credit.utilised(clientId))
             .putVenueTxnId(journal.venueTxnIdBytes(), venueIdOffset);
         offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + tradeEncoder.encodedLength());
+        copyToSubscribers(encodeRisk(instrumentId));
     }
 
     private int reject(
@@ -908,6 +911,7 @@ public final class RfqClusteredService implements ClusteredService
         journal.user(event, actor);
 
         offerAndCopy(session, encodeInventoryStatus(instrumentId));
+        copyToSubscribers(encodeRisk(instrumentId));
         return true;
     }
 
@@ -1121,6 +1125,7 @@ public final class RfqClusteredService implements ClusteredService
         for (int instrumentId = 0; instrumentId < Instruments.COUNT; instrumentId++)
         {
             offer(session, encodeInventoryStatus(instrumentId));
+            offer(session, encodeRisk(instrumentId));
         }
         for (int clientId = 0; clientId < CreditBook.CAPACITY; clientId++)
         {
@@ -1185,6 +1190,49 @@ public final class RfqClusteredService implements ClusteredService
     /**
      * Reply to the requester (blocking until sent), then drop-copy to monitors (one attempt each).
      */
+    /**
+     * Risk for one instrument plus the book totals, valued at each instrument's base spread.
+     */
+    private int encodeRisk(final int instrumentId)
+    {
+        double bookCs01 = 0;
+        double bookDv01 = 0;
+        double bookMark = 0;
+        for (int i = 0; i < Instruments.COUNT; i++)
+        {
+            final long net = positions.net(i);
+            bookCs01 += pricer.cs01(i, Instruments.baseSpreadBps(i), net);
+            bookDv01 += pricer.dv01(i, Instruments.baseSpreadBps(i), net);
+            bookMark += pricer.mark(i, net);
+        }
+        final long net = positions.net(instrumentId);
+        riskEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+            .instrumentId(instrumentId)
+            .netNotional(net)
+            .mark(pricer.mark(instrumentId, net))
+            .cs01(pricer.cs01(instrumentId, Instruments.baseSpreadBps(instrumentId), net))
+            .dv01(pricer.dv01(instrumentId, Instruments.baseSpreadBps(instrumentId), net))
+            .bookCs01(bookCs01)
+            .bookDv01(bookDv01)
+            .bookMark(bookMark);
+        return MessageHeaderEncoder.ENCODED_LENGTH + riskEncoder.encodedLength();
+    }
+
+    /**
+     * Drop copy only: monitors and risk consumers, no requester.
+     */
+    private void copyToSubscribers(final int length)
+    {
+        for (int i = 0; i < subscriberCount; i++)
+        {
+            final ClientSession subscriber = cluster.getClientSession(subscribers[i]);
+            if (null != subscriber && subscriber.offer(egressBuffer, 0, length) < 0)
+            {
+                droppedCopies++; // diagnostic only; never feeds back into state
+            }
+        }
+    }
+
     private void offerAndCopy(final ClientSession session, final int length)
     {
         offer(session, length);
