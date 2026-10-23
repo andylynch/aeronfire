@@ -76,6 +76,8 @@ class FailoverTest
         final Map<Long, Long> tradeByQuote = new HashMap<>();
         final io.aeronfire.sbe.RejectDecoder reject = new io.aeronfire.sbe.RejectDecoder();
         final Set<String> rejected = new HashSet<>();
+        final io.aeronfire.sbe.QuoteExpiredDecoder expired = new io.aeronfire.sbe.QuoteExpiredDecoder();
+        final Set<Long> expiredQuotes = new HashSet<>();
         final List<long[]> journalTrades = new ArrayList<>(); // seq, tradeId, quoteId
         final List<Long> journalSeqs = new ArrayList<>();
         long batchNext = -1;
@@ -101,6 +103,11 @@ class FailoverTest
                 {
                     trade.wrap(buffer, body, bl, v);
                     tradeByQuote.put(trade.quoteId(), trade.tradeId());
+                }
+                case io.aeronfire.sbe.QuoteExpiredDecoder.TEMPLATE_ID ->
+                {
+                    expired.wrap(buffer, body, bl, v);
+                    expiredQuotes.add(expired.quoteId());
                 }
                 case io.aeronfire.sbe.RejectDecoder.TEMPLATE_ID ->
                 {
@@ -194,6 +201,15 @@ class FailoverTest
                 }
             }
             assertTrue(killed && leaderKilled >= 0, "the leader was killed mid-flow");
+
+            // Expiry by cluster timer: an unaccepted quote is withdrawn and the client told, no accept needed.
+            resetCredit();
+            final long idleRfq = 5_000_000;
+            final Long idleQuote = quote(idleRfq, 2);
+            assertTrue(null != idleQuote, "got a quote to leave unaccepted");
+            assertTrue(await(() -> listener.expiredQuotes.contains(idleQuote)) ||
+                await(() -> listener.expiredQuotes.contains(idleQuote)), "QuoteExpired arrived for the idle quote");
+            assertEquals(-1, accept(idleRfq, idleQuote, null), "an expired quote can no longer be accepted");
             assertTrue(acked.size() > 50, "trading made progress across the failover: " + acked.size());
 
             readJournal();

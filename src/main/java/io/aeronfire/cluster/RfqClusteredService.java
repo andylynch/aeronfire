@@ -61,6 +61,7 @@ import io.aeronfire.sbe.OpenQuoteSnapshotEncoder;
 import io.aeronfire.sbe.PositionAdjustDecoder;
 import io.aeronfire.sbe.QuoteAcceptDecoder;
 import io.aeronfire.sbe.QuoteEncoder;
+import io.aeronfire.sbe.QuoteExpiredEncoder;
 import io.aeronfire.sbe.RejectEncoder;
 import io.aeronfire.sbe.RejectReason;
 import io.aeronfire.sbe.RfqRequestDecoder;
@@ -182,6 +183,8 @@ public final class RfqClusteredService implements ClusteredService
     private long nextTradeId;
     private long nextPendingId;
 
+    private final QuoteExpiredEncoder quoteExpiredEncoder = new QuoteExpiredEncoder();
+    private long quotesExpired; // diagnostic only
     private Cluster cluster;
     private IdleStrategy idleStrategy;
     private boolean snapshotLoaded;
@@ -354,6 +357,8 @@ public final class RfqClusteredService implements ClusteredService
         final long validUntil = timestamp + tier.quoteTtlMs();
         openQuotes.put(quoteId, rfqId, session.id(), clientId, instrumentId, clientBuys, notional, priceE6, validUntil,
             spreadBps);
+
+        scheduleExpiry(quoteId, validUntil);
 
         final int quoteEvent = journal.append(EventJournal.QUOTE, timestamp);
         journal.ids(quoteEvent, rfqId, quoteId, -1);
@@ -1208,9 +1213,40 @@ public final class RfqClusteredService implements ClusteredService
         }
     }
 
+    /**
+     * One cluster timer per quote, id = quote id. Timers are part of the replicated state (the consensus module
+     * snapshots them), so expiry happens at the same cluster time on every member and across restarts.
+     */
+    private void scheduleExpiry(final long quoteId, final long validUntil)
+    {
+        idleStrategy.reset();
+        while (!cluster.scheduleTimer(quoteId, validUntil + 1))
+        {
+            idleStrategy.idle();
+        }
+    }
+
     @Override
     public void onTimerEvent(final long correlationId, final long timestamp)
     {
+        final int slot = openQuotes.find(correlationId);
+        if (slot < 0 || openQuotes.validUntilAt(slot) >= timestamp)
+        {
+            return; // already traded, rejected or evicted
+        }
+        final ClientSession session = cluster.getClientSession(openQuotes.clusterSessionIdAt(slot));
+        final long rfq = openQuotes.rfqIdAt(slot);
+        final int client = openQuotes.clientIdAt(slot);
+        openQuotes.remove(slot);
+        quotesExpired++;
+        if (null != session)
+        {
+            quoteExpiredEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+                .quoteId(correlationId)
+                .rfqId(rfq)
+                .clientId(client);
+            offer(session, MessageHeaderEncoder.ENCODED_LENGTH + quoteExpiredEncoder.encodedLength());
+        }
     }
 
     // ================================================================== snapshot

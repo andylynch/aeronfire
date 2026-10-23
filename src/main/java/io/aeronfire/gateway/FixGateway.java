@@ -23,6 +23,7 @@ import io.aeronfire.sbe.MessageHeaderEncoder;
 import io.aeronfire.sbe.QuoteAcceptDecoder;
 import io.aeronfire.sbe.QuoteAcceptEncoder;
 import io.aeronfire.sbe.QuoteDecoder;
+import io.aeronfire.sbe.QuoteExpiredDecoder;
 import io.aeronfire.sbe.RejectDecoder;
 import io.aeronfire.sbe.RejectReason;
 import io.aeronfire.sbe.RfqRequestDecoder;
@@ -81,6 +82,7 @@ public final class FixGateway implements EgressListener
     private final QuoteDecoder clusterQuote = new QuoteDecoder();
     private final TradeDecoder clusterTrade = new TradeDecoder();
     private final RejectDecoder clusterReject = new RejectDecoder();
+    private final QuoteExpiredDecoder clusterExpired = new QuoteExpiredDecoder();
     private final UnsafeBuffer ingressBuffer = new UnsafeBuffer(ByteBuffer.allocateDirect(256));
 
     private final QuoteRequestDecoder fixQuoteRequest = new QuoteRequestDecoder();
@@ -558,6 +560,17 @@ public final class FixGateway implements EgressListener
             {
                 clusterReject.wrap(buffer, bodyOffset, blockLength, version);
                 onClusterReject();
+            }
+            case QuoteExpiredDecoder.TEMPLATE_ID ->
+            {
+                // The venue knows the quote's valid-until; just release our state for it.
+                clusterExpired.wrap(buffer, bodyOffset, blockLength, version);
+                final PendingRfq rfq = byQuoteId.get(clusterExpired.quoteId());
+                if (null != rfq && rfq.acceptSends == 0)
+                {
+                    stats.expired++;
+                    forget(rfq);
+                }
             }
             default ->
             {
