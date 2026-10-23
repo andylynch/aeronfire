@@ -118,6 +118,7 @@ public final class RfqClusteredService implements ClusteredService
     // ------------------------------------------------------------------ codecs (preallocated)
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
     private final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
+    private final ServiceTimings timings = new ServiceTimings();
     private final RfqRequestDecoder rfqDecoder = new RfqRequestDecoder();
     private final QuoteAcceptDecoder acceptDecoder = new QuoteAcceptDecoder();
     private final CreditUpdateDecoder creditUpdateDecoder = new CreditUpdateDecoder();
@@ -192,6 +193,14 @@ public final class RfqClusteredService implements ClusteredService
     private boolean snapshotLoaded;
     private long droppedCopies;
 
+    /**
+     * Handling-time metrics for the latency report; not part of the replicated state.
+     */
+    public ServiceTimings timings()
+    {
+        return timings;
+    }
+
     public RfqClusteredService()
     {
         this(Pricer.defaults());
@@ -244,12 +253,16 @@ public final class RfqClusteredService implements ClusteredService
             case RfqRequestDecoder.TEMPLATE_ID ->
             {
                 rfqDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                final long t0 = System.nanoTime();
                 onRfq(session, timestamp);
+                timings.rfq(System.nanoTime() - t0);
             }
             case QuoteAcceptDecoder.TEMPLATE_ID ->
             {
                 acceptDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                final long t0 = System.nanoTime();
                 onAccept(session, timestamp);
+                timings.accept(System.nanoTime() - t0);
             }
             case EventFeedRequestDecoder.TEMPLATE_ID ->
             {

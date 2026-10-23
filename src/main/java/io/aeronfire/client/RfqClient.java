@@ -142,10 +142,14 @@ public final class RfqClient implements EgressListener
 
             final Histogram rfqToQuote = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
             final Histogram acceptToTrade = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
+            client.offerNs = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
+            System.out.printf("timed phase start ts=%d%n", System.currentTimeMillis());
             client.run(cluster, count, resetEvery, rfqToQuote, acceptToTrade);
+            System.out.printf("timed phase end ts=%d%n", System.currentTimeMillis());
 
-            print("RFQ -> quote", rfqToQuote);
-            print("accept -> trade", acceptToTrade);
+            print("rfq-quote", rfqToQuote);
+            print("accept-trade", acceptToTrade);
+            print("client-offer", client.offerNs);
             System.out.printf("trades %d%n", client.trades);
             for (final RejectReason reason : RejectReason.values())
             {
@@ -220,10 +224,13 @@ public final class RfqClient implements EgressListener
         System.out.println("RTS 6 throttle lifted for the load test");
     }
 
+    private Histogram offerNs;
+
     private void send(final AeronCluster cluster, final int length)
     {
         response = NO_RESPONSE;
         idleStrategy.reset();
+        final long offerStart = System.nanoTime();
         while (cluster.offer(sendBuffer, 0, length) < 0)
         {
             if (cluster.isClosed())
@@ -232,6 +239,7 @@ public final class RfqClient implements EgressListener
             }
             idleStrategy.idle(cluster.pollEgress());
         }
+        record(offerNs, offerStart);
     }
 
     private int await(final AeronCluster cluster)
@@ -261,6 +269,8 @@ public final class RfqClient implements EgressListener
             h.getValueAtPercentile(99) / 1000.0,
             h.getValueAtPercentile(99.9) / 1000.0,
             h.getMaxValue() / 1000.0);
+        System.out.printf("hop=%s n=%d p50=%d p99=%d p99.9=%d max=%d%n", label, h.getTotalCount(),
+            h.getValueAtPercentile(50), h.getValueAtPercentile(99), h.getValueAtPercentile(99.9), h.getMaxValue());
     }
 
     private static String env(final String name, final String defaultValue)

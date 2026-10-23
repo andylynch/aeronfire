@@ -183,6 +183,23 @@ ASOF_SEQ=150 SHOCK_BPS=25 ./gradlew runRiskAsOf          # or ASOF_TIME=2026-10-
 `ARCHIVE_NODE` picks the member, `REPLAY_ENDPOINT` is where the replay is delivered. The reach back is the
 journal carried in the snapshot (the most recent events); older points need an earlier snapshot.
 
+### Latency report
+
+```bash
+./gradlew installDist
+GCS="G1 ZGC" COUNT=50000 LABEL=gcp-e2-standard-4 scripts/latency-report.sh   # writes build/latency/latency-<label>.md
+```
+
+Starts a 3-node cluster per GC setting and records HdrHistogram percentiles per hop: `client-offer`,
+`rfq-quote` and `accept-trade` round trips, and the time the clustered service spends in each handler
+(`service-rfq`, `service-accept`, from `LATENCY_REPORT_S` on the node). Round trip minus service time is
+roughly ingress, consensus (append, replicate, commit) and egress. Run it on each host to compare, for
+example a bare-metal box (isolated cores, `taskset`, a dedicated NIC) against a cloud VM, and diff the
+reports. The service tail rows merge per-interval histograms conservatively (worst interval).
+
+Numbers from a 2-vCPU sandbox running three nodes and the client together are not representative (p50 about
+340us, p99 about 8ms, scheduler noise dominates); the point is the method.
+
 ### Requirements
 
 JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona need on recent JDKs:

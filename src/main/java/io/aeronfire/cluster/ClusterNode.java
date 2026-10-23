@@ -31,7 +31,8 @@ public final class ClusterNode
         final List<String> hosts = List.of(env("CLUSTER_HOSTS", "localhost,localhost,localhost").split(","));
         final int portBase = Integer.parseInt(env("PORT_BASE", "9000"));
 
-        final ClusterConfig config = ClusterConfig.create(nodeId, hosts, hosts, portBase, new RfqClusteredService());
+        final RfqClusteredService service = new RfqClusteredService();
+        final ClusterConfig config = ClusterConfig.create(nodeId, hosts, hosts, portBase, service);
         // ClusterConfig doesn't set this; the member's own ingress endpoint comes from the cluster members string.
         config.consensusModuleContext().ingressChannel("aeron:udp?term-length=64k");
         final String controlSecret = env("CONTROL_SECRET", ClusterAuthenticator.DEFAULT_SECRET);
@@ -49,9 +50,40 @@ public final class ClusterNode
                 config.clusteredServiceContext()))
         {
             System.out.printf("aeronfire node %d up, members %s, port base %d%n", nodeId, hosts, portBase);
+            startLatencyReporter(nodeId, service.timings());
             barrier.await();
             System.out.printf("aeronfire node %d shutting down%n", nodeId);
         }
+    }
+
+    /**
+     * LATENCY_REPORT_S=n prints the service handling-time histograms every n seconds (for the latency report).
+     */
+    private static void startLatencyReporter(final int nodeId, final ServiceTimings timings)
+    {
+        final int seconds = Integer.parseInt(env("LATENCY_REPORT_S", "0"));
+        if (seconds <= 0)
+        {
+            return;
+        }
+        final Thread t = new Thread(() ->
+        {
+            while (!Thread.currentThread().isInterrupted())
+            {
+                try
+                {
+                    Thread.sleep(seconds * 1_000L);
+                }
+                catch (final InterruptedException ex)
+                {
+                    return;
+                }
+                System.out.print(timings.report(nodeId));
+                System.out.flush();
+            }
+        }, "latency-reporter");
+        t.setDaemon(true);
+        t.start();
     }
 
     private static org.agrona.ErrorHandler errorHandler(final int nodeId, final String component)
