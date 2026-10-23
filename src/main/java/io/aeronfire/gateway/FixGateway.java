@@ -6,6 +6,7 @@ import io.aeron.logbuffer.ControlledFragmentHandler.Action;
 import io.aeron.logbuffer.Header;
 import io.aeron.samples.cluster.ClusterConfig;
 import io.aeronfire.artio.ArtioRuntime;
+import io.aeronfire.util.ShutdownFlag;
 import io.aeronfire.domain.Instruments;
 import io.aeronfire.fix.ExecType;
 import io.aeronfire.fix.FixDictionaryImpl;
@@ -32,7 +33,6 @@ import org.agrona.DirectBuffer;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
-import org.agrona.concurrent.SigInt;
 import org.agrona.concurrent.UnsafeBuffer;
 import uk.co.real_logic.artio.fields.DecimalFloat;
 import uk.co.real_logic.artio.fields.UtcTimestampEncoder;
@@ -51,7 +51,6 @@ import uk.co.real_logic.artio.builder.Encoder;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * FIX gateway: the dealer's side of a Tradeweb-style RFQ venue.
@@ -143,8 +142,7 @@ public final class FixGateway implements EgressListener
         final File workDir = new File(env("WORK_DIR", "build"));
 
         final FixGateway gateway = new FixGateway();
-        final AtomicBoolean running = new AtomicBoolean(true);
-        SigInt.register(() -> running.set(false));
+        final ShutdownFlag running = ShutdownFlag.register();
 
         try (ArtioRuntime artio = ArtioRuntime.launch("gateway", workDir, (configuration) -> configuration
                 .bindTo("0.0.0.0", fixPort)
@@ -166,15 +164,16 @@ public final class FixGateway implements EgressListener
                 GATEWAY_COMP_ID, fixPort, cluster.leaderMemberId());
             gateway.run(library, running);
         }
+        running.closed();
     }
 
-    private void run(final FixLibrary library, final AtomicBoolean running)
+    private void run(final FixLibrary library, final ShutdownFlag running)
     {
         final IdleStrategy idle = new BackoffIdleStrategy();
         long lastKeepAliveMs = System.currentTimeMillis();
         long lastStatsMs = lastKeepAliveMs;
 
-        while (running.get())
+        while (running.isRunning())
         {
             final int work = library.poll(10) + cluster.pollEgress();
 

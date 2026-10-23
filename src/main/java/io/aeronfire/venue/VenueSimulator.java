@@ -2,6 +2,7 @@ package io.aeronfire.venue;
 
 import io.aeron.logbuffer.ControlledFragmentHandler.Action;
 import io.aeronfire.artio.ArtioRuntime;
+import io.aeronfire.util.ShutdownFlag;
 import io.aeronfire.domain.Instruments;
 import io.aeronfire.fix.ExecType;
 import io.aeronfire.fix.FixDictionaryImpl;
@@ -16,7 +17,6 @@ import org.agrona.DirectBuffer;
 import org.agrona.collections.Object2LongHashMap;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
-import org.agrona.concurrent.SigInt;
 import uk.co.real_logic.artio.Reply;
 import uk.co.real_logic.artio.builder.Encoder;
 import uk.co.real_logic.artio.library.FixLibrary;
@@ -31,7 +31,6 @@ import uk.co.real_logic.artio.util.MutableAsciiBuffer;
 import java.io.File;
 import java.util.SplittableRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A Tradeweb-style RFQ venue, simulated: clients send RFQs, several dealers compete, the client trades
@@ -96,8 +95,7 @@ public final class VenueSimulator
             Long.parseLong(env("SEED", "42")),
             Integer.parseInt(env("COMP_DEALERS", "3")),
             Double.parseDouble(env("COMP_NOISE_POINTS", "0.15")));
-        final AtomicBoolean running = new AtomicBoolean(true);
-        SigInt.register(() -> running.set(false));
+        final ShutdownFlag running = ShutdownFlag.register();
 
         try (ArtioRuntime artio = ArtioRuntime.launch("venue", workDir, (configuration) -> { });
              FixLibrary library = artio.connectLibrary(new LibraryConfiguration()
@@ -109,6 +107,7 @@ public final class VenueSimulator
             venue.run(library, running, rfqsPerSecond, durationSeconds);
             venue.printStats();
         }
+        running.closed();
     }
 
     private Session connect(final FixLibrary library, final String host, final int port)
@@ -152,7 +151,7 @@ public final class VenueSimulator
     }
 
     private void run(
-        final FixLibrary library, final AtomicBoolean running, final int rfqsPerSecond, final long durationSeconds)
+        final FixLibrary library, final ShutdownFlag running, final int rfqsPerSecond, final long durationSeconds)
     {
         final IdleStrategy idle = new BackoffIdleStrategy();
         final long intervalNs = TimeUnit.SECONDS.toNanos(1) / Math.max(1, rfqsPerSecond);
@@ -160,7 +159,7 @@ public final class VenueSimulator
         long nextRfqNs = System.nanoTime();
         long nextStatsNs = nextRfqNs + TimeUnit.SECONDS.toNanos(5);
 
-        while (running.get() && System.nanoTime() < endNs && session.isActive())
+        while (running.isRunning() && System.nanoTime() < endNs && session.isActive())
         {
             int work = library.poll(10);
 

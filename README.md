@@ -4,7 +4,7 @@ A credit RFQ and pricing engine running as a replicated state machine on [Aeron 
 A small, honest model of the pieces a dealer needs on a credit RFQ venue: a FIX gateway, firm quotes,
 pre-trade credit and client tiering, execution, positions and spread risk, with failover that loses nothing.
 
-Java 25 · Aeron 1.48 · Artio (FIX) · SBE · Agrona · HdrHistogram · Gradle 9
+Java 25 · Aeron 1.53 · Artio (FIX) · SBE · Agrona · HdrHistogram · Gradle 9
 
 ## What it does
 

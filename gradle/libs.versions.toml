@@ -1,7 +1,9 @@
 [versions]
-# Aeron 1.48.4 ships with Agrona 2.2.4 and SBE 1.35.6. Keep the three in step.
+# Keep Aeron, SBE and Artio in step: each Artio release is built against one Aeron version.
 aeron = "1.53.3"
 sbe = "1.41.0"
+# Artio 0.186 is built against Aeron 1.53.3 / Agrona 2.6.1.
+artio = "0.186"
 hdrhistogram = "2.2.2"
 junit = "5.12.2"
 
