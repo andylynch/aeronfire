@@ -8,12 +8,19 @@ import io.aeron.cluster.service.Cluster;
 import io.aeron.cluster.service.ClusteredService;
 import io.aeron.logbuffer.FragmentHandler;
 import io.aeron.logbuffer.Header;
+import io.aeronfire.domain.CreditBook;
 import io.aeronfire.domain.Instruments;
 import io.aeronfire.domain.OpenQuotes;
 import io.aeronfire.domain.Positions;
 import io.aeronfire.domain.Pricer;
+import io.aeronfire.domain.Tier;
 import io.aeronfire.sbe.BookSnapshotDecoder;
 import io.aeronfire.sbe.BookSnapshotEncoder;
+import io.aeronfire.sbe.BooleanType;
+import io.aeronfire.sbe.ClientCreditSnapshotDecoder;
+import io.aeronfire.sbe.ClientCreditSnapshotEncoder;
+import io.aeronfire.sbe.CreditStatusEncoder;
+import io.aeronfire.sbe.CreditUpdateDecoder;
 import io.aeronfire.sbe.MessageHeaderDecoder;
 import io.aeronfire.sbe.MessageHeaderEncoder;
 import io.aeronfire.sbe.OpenQuoteSnapshotDecoder;
@@ -40,23 +47,29 @@ import java.nio.ByteBuffer;
  * Every node applies the same sequenced log, so this class must be deterministic: it uses only cluster
  * time (never the wall clock), issues ids from counters, and derives all state from log messages. Hot-path
  * handlers do not allocate: codecs and buffers are preallocated and state lives in primitive arrays.
+ * <p>
+ * Pre-trade credit runs here too, so limits are enforced against the same sequenced view of trades on
+ * every member: no race between two gateways spending the same headroom.
  */
 public final class RfqClusteredService implements ClusteredService
 {
-    static final long QUOTE_TTL_MS = 2_000;
     private static final int OPEN_QUOTE_CAPACITY = 4096;
 
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
     private final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
     private final RfqRequestDecoder rfqDecoder = new RfqRequestDecoder();
     private final QuoteAcceptDecoder acceptDecoder = new QuoteAcceptDecoder();
+    private final CreditUpdateDecoder creditUpdateDecoder = new CreditUpdateDecoder();
     private final QuoteEncoder quoteEncoder = new QuoteEncoder();
     private final TradeEncoder tradeEncoder = new TradeEncoder();
     private final RejectEncoder rejectEncoder = new RejectEncoder();
+    private final CreditStatusEncoder creditStatusEncoder = new CreditStatusEncoder();
     private final BookSnapshotEncoder bookSnapshotEncoder = new BookSnapshotEncoder();
     private final BookSnapshotDecoder bookSnapshotDecoder = new BookSnapshotDecoder();
     private final OpenQuoteSnapshotEncoder quoteSnapshotEncoder = new OpenQuoteSnapshotEncoder();
     private final OpenQuoteSnapshotDecoder quoteSnapshotDecoder = new OpenQuoteSnapshotDecoder();
+    private final ClientCreditSnapshotEncoder creditSnapshotEncoder = new ClientCreditSnapshotEncoder();
+    private final ClientCreditSnapshotDecoder creditSnapshotDecoder = new ClientCreditSnapshotDecoder();
     private final SnapshotEndEncoder snapshotEndEncoder = new SnapshotEndEncoder();
     private final SnapshotEndDecoder snapshotEndDecoder = new SnapshotEndDecoder();
     private final MutableDirectBuffer egressBuffer = new UnsafeBuffer(ByteBuffer.allocateDirect(256));
@@ -64,6 +77,7 @@ public final class RfqClusteredService implements ClusteredService
     private final Pricer pricer;
     private final Positions positions = new Positions();
     private final OpenQuotes openQuotes = new OpenQuotes(OPEN_QUOTE_CAPACITY);
+    private final CreditBook credit = CreditBook.withDemoClients();
 
     private Cluster cluster;
     private IdleStrategy idleStrategy;
@@ -129,6 +143,11 @@ public final class RfqClusteredService implements ClusteredService
                 acceptDecoder.wrap(buffer, bodyOffset, blockLength, version);
                 onAccept(session, timestamp);
             }
+            case CreditUpdateDecoder.TEMPLATE_ID ->
+            {
+                creditUpdateDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                onCreditUpdate(session);
+            }
             default -> reject(session, -1, RejectReason.INVALID_REQUEST);
         }
     }
@@ -136,6 +155,7 @@ public final class RfqClusteredService implements ClusteredService
     private void onRfq(final ClientSession session, final long timestamp)
     {
         final long rfqId = rfqDecoder.rfqId();
+        final int clientId = rfqDecoder.clientId();
         final int instrumentId = rfqDecoder.instrumentId();
         // Read the raw enum value: decoding an unknown value would throw, and an exception here would stall the log.
         final short sideRaw = rfqDecoder.sideRaw();
@@ -152,18 +172,28 @@ public final class RfqClusteredService implements ClusteredService
             return;
         }
 
+        final CreditBook.Check check = credit.check(clientId, notional);
+        if (check != CreditBook.Check.OK)
+        {
+            reject(session, rfqId, toRejectReason(check));
+            return;
+        }
+
+        final Tier tier = credit.tier(clientId);
         final boolean clientBuys = sideRaw == Side.BUY.value();
         final Side side = clientBuys ? Side.BUY : Side.SELL;
-        final int spreadBps = pricer.quotedSpreadBps(instrumentId, clientBuys, notional, positions.net(instrumentId));
+        final int spreadBps = pricer.quotedSpreadBps(instrumentId, clientBuys, notional, positions.net(instrumentId))
+            + tier.spreadAdjustBps();
         final long priceE6 = pricer.priceE6(instrumentId, spreadBps);
         final long quoteId = nextQuoteId++;
-        final long validUntil = timestamp + QUOTE_TTL_MS;
+        final long validUntil = timestamp + tier.quoteTtlMs();
 
-        openQuotes.put(quoteId, rfqId, session.id(), instrumentId, clientBuys, notional, priceE6, validUntil);
+        openQuotes.put(quoteId, rfqId, session.id(), clientId, instrumentId, clientBuys, notional, priceE6, validUntil);
 
         quoteEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
             .rfqId(rfqId)
             .quoteId(quoteId)
+            .clientId(clientId)
             .instrumentId(instrumentId)
             .side(side)
             .notional(notional)
@@ -191,23 +221,72 @@ public final class RfqClusteredService implements ClusteredService
             return;
         }
 
+        final int clientId = openQuotes.clientIdAt(slot);
+        final long notional = openQuotes.notionalAt(slot);
+
+        // Re-check: other trades may have used the client's headroom since we quoted.
+        final CreditBook.Check check = credit.check(clientId, notional);
+        if (check != CreditBook.Check.OK)
+        {
+            openQuotes.remove(slot);
+            reject(session, quoteId, toRejectReason(check));
+            return;
+        }
+
         final int instrumentId = openQuotes.instrumentIdAt(slot);
         final boolean clientBuys = openQuotes.clientBuysAt(slot);
-        final long notional = openQuotes.notionalAt(slot);
         final long priceE6 = openQuotes.priceE6At(slot);
         openQuotes.remove(slot);
         positions.applyFill(instrumentId, clientBuys, notional);
+        credit.consume(clientId, notional);
 
         tradeEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
             .tradeId(nextTradeId++)
             .rfqId(rfqId)
             .quoteId(quoteId)
+            .clientId(clientId)
             .instrumentId(instrumentId)
             .side(clientBuys ? Side.BUY : Side.SELL)
             .notional(notional)
             .price(priceE6)
-            .executedAt(timestamp);
+            .executedAt(timestamp)
+            .clientUtilised(credit.utilised(clientId));
         offer(session, MessageHeaderEncoder.ENCODED_LENGTH + tradeEncoder.encodedLength());
+    }
+
+    private void onCreditUpdate(final ClientSession session)
+    {
+        final int clientId = creditUpdateDecoder.clientId();
+        final Tier tier = Tier.fromCode(creditUpdateDecoder.tierRaw());
+        final long limit = creditUpdateDecoder.limit();
+
+        if (!CreditBook.isValidId(clientId) || null == tier || limit < 0)
+        {
+            reject(session, clientId, RejectReason.INVALID_REQUEST);
+            return;
+        }
+
+        final boolean reset = creditUpdateDecoder.resetUtilisationRaw() == BooleanType.TRUE.value();
+        final long utilised = reset || !credit.isKnown(clientId) ? 0 : credit.utilised(clientId);
+        credit.upsert(clientId, tier, limit, utilised);
+
+        creditStatusEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+            .clientId(clientId)
+            .tier(io.aeronfire.sbe.Tier.get((short)tier.ordinal()))
+            .limit(limit)
+            .utilised(utilised);
+        offer(session, MessageHeaderEncoder.ENCODED_LENGTH + creditStatusEncoder.encodedLength());
+    }
+
+    private static RejectReason toRejectReason(final CreditBook.Check check)
+    {
+        return switch (check)
+        {
+            case UNKNOWN_CLIENT -> RejectReason.UNKNOWN_CLIENT;
+            case ABOVE_TIER_MAX -> RejectReason.ABOVE_TIER_MAX;
+            case CREDIT_LIMIT -> RejectReason.CREDIT_LIMIT;
+            case OK -> throw new IllegalArgumentException("not a rejection");
+        };
     }
 
     private void reject(final ClientSession session, final long correlationId, final RejectReason reason)
@@ -253,7 +332,7 @@ public final class RfqClusteredService implements ClusteredService
         }
         offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + bookSnapshotEncoder.encodedLength());
 
-        int written = 0;
+        int quotesWritten = 0;
         for (int slot = 0; slot < openQuotes.capacity(); slot++)
         {
             final long quoteId = openQuotes.quoteIdAt(slot);
@@ -266,16 +345,36 @@ public final class RfqClusteredService implements ClusteredService
                 .quoteId(quoteId)
                 .rfqId(openQuotes.rfqIdAt(slot))
                 .clusterSessionId(openQuotes.clusterSessionIdAt(slot))
+                .clientId(openQuotes.clientIdAt(slot))
                 .instrumentId(openQuotes.instrumentIdAt(slot))
                 .side(openQuotes.clientBuysAt(slot) ? Side.BUY : Side.SELL)
                 .notional(openQuotes.notionalAt(slot))
                 .price(openQuotes.priceE6At(slot))
                 .validUntil(openQuotes.validUntilAt(slot));
             offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + quoteSnapshotEncoder.encodedLength());
-            written++;
+            quotesWritten++;
         }
 
-        snapshotEndEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder).openQuoteCount(written);
+        int clientsWritten = 0;
+        for (int clientId = 0; clientId < CreditBook.CAPACITY; clientId++)
+        {
+            if (!credit.isKnown(clientId))
+            {
+                continue;
+            }
+
+            creditSnapshotEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+                .clientId(clientId)
+                .tier(io.aeronfire.sbe.Tier.get((short)credit.tier(clientId).ordinal()))
+                .limit(credit.limit(clientId))
+                .utilised(credit.utilised(clientId));
+            offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + creditSnapshotEncoder.encodedLength());
+            clientsWritten++;
+        }
+
+        snapshotEndEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+            .openQuoteCount(quotesWritten)
+            .clientCount(clientsWritten);
         offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + snapshotEndEncoder.encodedLength());
     }
 
@@ -291,6 +390,7 @@ public final class RfqClusteredService implements ClusteredService
     private void loadSnapshot(final Image snapshotImage)
     {
         snapshotLoaded = false;
+        credit.clear(); // the snapshot is authoritative; drop the demo seed
         final FragmentHandler handler = this::onSnapshotFragment;
 
         idleStrategy.reset();
@@ -335,11 +435,21 @@ public final class RfqClusteredService implements ClusteredService
                     quoteSnapshotDecoder.quoteId(),
                     quoteSnapshotDecoder.rfqId(),
                     quoteSnapshotDecoder.clusterSessionId(),
+                    quoteSnapshotDecoder.clientId(),
                     quoteSnapshotDecoder.instrumentId(),
                     quoteSnapshotDecoder.side() == Side.BUY,
                     quoteSnapshotDecoder.notional(),
                     quoteSnapshotDecoder.price(),
                     quoteSnapshotDecoder.validUntil());
+            }
+            case ClientCreditSnapshotDecoder.TEMPLATE_ID ->
+            {
+                creditSnapshotDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                credit.upsert(
+                    creditSnapshotDecoder.clientId(),
+                    Tier.fromCode(creditSnapshotDecoder.tierRaw()),
+                    creditSnapshotDecoder.limit(),
+                    creditSnapshotDecoder.utilised());
             }
             case SnapshotEndDecoder.TEMPLATE_ID ->
             {
@@ -358,16 +468,5 @@ public final class RfqClusteredService implements ClusteredService
     @Override
     public void onTerminate(final Cluster cluster)
     {
-    }
-
-    // Visible for tests and diagnostics.
-    long netPosition(final int instrumentId)
-    {
-        return positions.net(instrumentId);
-    }
-
-    int liveQuoteCount()
-    {
-        return openQuotes.liveCount();
     }
 }

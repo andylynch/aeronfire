@@ -11,6 +11,7 @@ import io.aeronfire.sbe.MessageHeaderEncoder;
 import io.aeronfire.sbe.QuoteAcceptEncoder;
 import io.aeronfire.sbe.QuoteDecoder;
 import io.aeronfire.sbe.RejectDecoder;
+import io.aeronfire.sbe.RejectReason;
 import io.aeronfire.sbe.RfqRequestEncoder;
 import io.aeronfire.sbe.Side;
 import io.aeronfire.sbe.TradeDecoder;
@@ -37,6 +38,7 @@ public final class RfqClient implements EgressListener
     private static final int GOT_QUOTE = 1;
     private static final int GOT_TRADE = 2;
     private static final int GOT_REJECT = 3;
+    private static final int CLIENTS = 10; // demo clients 0..9, seeded in the cluster across all tiers
 
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
     private final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
@@ -51,7 +53,7 @@ public final class RfqClient implements EgressListener
     private int response = NO_RESPONSE;
     private long lastQuoteId;
     private long trades;
-    private long rejects;
+    private final long[] rejectsByReason = new long[RejectReason.values().length];
 
     @Override
     public void onMessage(
@@ -84,7 +86,11 @@ public final class RfqClient implements EgressListener
             case RejectDecoder.TEMPLATE_ID ->
             {
                 rejectDecoder.wrap(buffer, bodyOffset, blockLength, version);
-                rejects++;
+                final short reason = rejectDecoder.reasonRaw();
+                if (reason >= 0 && reason < rejectsByReason.length - 1)
+                {
+                    rejectsByReason[reason]++;
+                }
                 response = GOT_REJECT;
             }
             default ->
@@ -125,7 +131,14 @@ public final class RfqClient implements EgressListener
 
             print("RFQ -> quote", rfqToQuote);
             print("accept -> trade", acceptToTrade);
-            System.out.printf("trades %d, rejects %d%n", client.trades, client.rejects);
+            System.out.printf("trades %d%n", client.trades);
+            for (final RejectReason reason : RejectReason.values())
+            {
+                if (reason != RejectReason.NULL_VAL && client.rejectsByReason[reason.value()] > 0)
+                {
+                    System.out.printf("rejects %-18s %d%n", reason, client.rejectsByReason[reason.value()]);
+                }
+            }
         }
     }
 
@@ -137,9 +150,10 @@ public final class RfqClient implements EgressListener
             final long rfqId = i;
             rfqEncoder.wrapAndApplyHeader(sendBuffer, 0, headerEncoder)
                 .rfqId(rfqId)
+                .clientId(i % CLIENTS)
                 .instrumentId(i % 5)
                 .side((i & 1) == 0 ? Side.BUY : Side.SELL)
-                .notional(5_000_000L);
+                .notional(2_000_000L);
 
             long start = System.nanoTime();
             send(cluster, MessageHeaderEncoder.ENCODED_LENGTH + rfqEncoder.encodedLength());

@@ -3,7 +3,7 @@
                    package="io.aeronfire.sbe"
                    id="701"
                    version="1"
-                   semanticVersion="0.1.0"
+                   semanticVersion="0.2.0"
                    description="aeronfire credit RFQ messages"
                    byteOrder="littleEndian">
     <types>
@@ -27,20 +27,33 @@
             <validValue name="BUY">0</validValue>
             <validValue name="SELL">1</validValue>
         </enum>
+        <enum name="Tier" encodingType="uint8">
+            <validValue name="TIER_1">0</validValue>
+            <validValue name="TIER_2">1</validValue>
+            <validValue name="TIER_3">2</validValue>
+        </enum>
+        <enum name="BooleanType" encodingType="uint8">
+            <validValue name="FALSE">0</validValue>
+            <validValue name="TRUE">1</validValue>
+        </enum>
         <enum name="RejectReason" encodingType="uint8">
             <validValue name="UNKNOWN_INSTRUMENT">0</validValue>
             <validValue name="UNKNOWN_QUOTE">1</validValue>
             <validValue name="QUOTE_EXPIRED">2</validValue>
             <validValue name="INVALID_REQUEST">3</validValue>
+            <validValue name="UNKNOWN_CLIENT">4</validValue>
+            <validValue name="ABOVE_TIER_MAX">5</validValue>
+            <validValue name="CREDIT_LIMIT">6</validValue>
         </enum>
     </types>
 
-    <!-- Ingress: client to cluster -->
+    <!-- Ingress: client or gateway to cluster -->
     <sbe:message name="RfqRequest" id="1" description="Client asks for a price">
         <field name="rfqId" id="1" type="int64"/>
-        <field name="instrumentId" id="2" type="int32"/>
-        <field name="side" id="3" type="Side" description="Client side: BUY means the client buys from us"/>
-        <field name="notional" id="4" type="Notional"/>
+        <field name="clientId" id="2" type="int32" description="End client, for credit and tiering"/>
+        <field name="instrumentId" id="3" type="int32"/>
+        <field name="side" id="4" type="Side" description="Client side: BUY means the client buys from us"/>
+        <field name="notional" id="5" type="Notional"/>
     </sbe:message>
 
     <sbe:message name="QuoteAccept" id="2" description="Client lifts or hits a quote">
@@ -48,32 +61,49 @@
         <field name="quoteId" id="2" type="int64"/>
     </sbe:message>
 
-    <!-- Egress: cluster to client -->
+    <sbe:message name="CreditUpdate" id="3" description="Admin: create or change a client's credit line">
+        <field name="clientId" id="1" type="int32"/>
+        <field name="tier" id="2" type="Tier"/>
+        <field name="limit" id="3" type="Notional"/>
+        <field name="resetUtilisation" id="4" type="BooleanType"/>
+    </sbe:message>
+
+    <!-- Egress: cluster to client or gateway -->
     <sbe:message name="Quote" id="10" description="Firm quote, valid until a cluster timestamp">
         <field name="rfqId" id="1" type="int64"/>
         <field name="quoteId" id="2" type="int64"/>
-        <field name="instrumentId" id="3" type="int32"/>
-        <field name="side" id="4" type="Side"/>
-        <field name="notional" id="5" type="Notional"/>
-        <field name="price" id="6" type="PriceE6"/>
-        <field name="spreadBps" id="7" type="Bps"/>
-        <field name="validUntil" id="8" type="int64" description="Cluster time, ms"/>
+        <field name="clientId" id="3" type="int32"/>
+        <field name="instrumentId" id="4" type="int32"/>
+        <field name="side" id="5" type="Side"/>
+        <field name="notional" id="6" type="Notional"/>
+        <field name="price" id="7" type="PriceE6"/>
+        <field name="spreadBps" id="8" type="Bps"/>
+        <field name="validUntil" id="9" type="int64" description="Cluster time, ms"/>
     </sbe:message>
 
     <sbe:message name="Trade" id="11" description="Executed trade">
         <field name="tradeId" id="1" type="int64"/>
         <field name="rfqId" id="2" type="int64"/>
         <field name="quoteId" id="3" type="int64"/>
-        <field name="instrumentId" id="4" type="int32"/>
-        <field name="side" id="5" type="Side"/>
-        <field name="notional" id="6" type="Notional"/>
-        <field name="price" id="7" type="PriceE6"/>
-        <field name="executedAt" id="8" type="int64" description="Cluster time, ms"/>
+        <field name="clientId" id="4" type="int32"/>
+        <field name="instrumentId" id="5" type="int32"/>
+        <field name="side" id="6" type="Side"/>
+        <field name="notional" id="7" type="Notional"/>
+        <field name="price" id="8" type="PriceE6"/>
+        <field name="executedAt" id="9" type="int64" description="Cluster time, ms"/>
+        <field name="clientUtilised" id="10" type="Notional" description="Client credit used after this trade"/>
     </sbe:message>
 
     <sbe:message name="Reject" id="12" description="Request rejected">
         <field name="correlationId" id="1" type="int64"/>
         <field name="reason" id="2" type="RejectReason"/>
+    </sbe:message>
+
+    <sbe:message name="CreditStatus" id="13" description="A client's credit line after an update">
+        <field name="clientId" id="1" type="int32"/>
+        <field name="tier" id="2" type="Tier"/>
+        <field name="limit" id="3" type="Notional"/>
+        <field name="utilised" id="4" type="Notional"/>
     </sbe:message>
 
     <!--
@@ -94,14 +124,23 @@
         <field name="quoteId" id="1" type="int64"/>
         <field name="rfqId" id="2" type="int64"/>
         <field name="clusterSessionId" id="3" type="int64"/>
-        <field name="instrumentId" id="4" type="int32"/>
-        <field name="side" id="5" type="Side"/>
-        <field name="notional" id="6" type="Notional"/>
-        <field name="price" id="7" type="PriceE6"/>
-        <field name="validUntil" id="8" type="int64"/>
+        <field name="clientId" id="4" type="int32"/>
+        <field name="instrumentId" id="5" type="int32"/>
+        <field name="side" id="6" type="Side"/>
+        <field name="notional" id="7" type="Notional"/>
+        <field name="price" id="8" type="PriceE6"/>
+        <field name="validUntil" id="9" type="int64"/>
+    </sbe:message>
+
+    <sbe:message name="ClientCreditSnapshot" id="23" description="One client's credit line">
+        <field name="clientId" id="1" type="int32"/>
+        <field name="tier" id="2" type="Tier"/>
+        <field name="limit" id="3" type="Notional"/>
+        <field name="utilised" id="4" type="Notional"/>
     </sbe:message>
 
     <sbe:message name="SnapshotEnd" id="22" description="Marks a complete snapshot">
         <field name="openQuoteCount" id="1" type="int32"/>
+        <field name="clientCount" id="2" type="int32"/>
     </sbe:message>
 </sbe:messageSchema>

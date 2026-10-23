@@ -14,6 +14,7 @@ public final class OpenQuotes
     private final long[] quoteId;
     private final long[] rfqId;
     private final long[] clusterSessionId;
+    private final int[] clientId;
     private final int[] instrumentId;
     private final boolean[] clientBuys;
     private final long[] notional;
@@ -31,6 +32,7 @@ public final class OpenQuotes
         quoteId = new long[capacityPowerOfTwo];
         rfqId = new long[capacityPowerOfTwo];
         clusterSessionId = new long[capacityPowerOfTwo];
+        clientId = new int[capacityPowerOfTwo];
         instrumentId = new int[capacityPowerOfTwo];
         clientBuys = new boolean[capacityPowerOfTwo];
         notional = new long[capacityPowerOfTwo];
@@ -48,6 +50,7 @@ public final class OpenQuotes
         final long id,
         final long rfq,
         final long sessionId,
+        final int client,
         final int instrument,
         final boolean buys,
         final long size,
@@ -58,6 +61,7 @@ public final class OpenQuotes
         quoteId[slot] = id;
         rfqId[slot] = rfq;
         clusterSessionId[slot] = sessionId;
+        clientId[slot] = client;
         instrumentId[slot] = instrument;
         clientBuys[slot] = buys;
         notional[slot] = size;
@@ -96,6 +100,11 @@ public final class OpenQuotes
     public long clusterSessionIdAt(final int slot)
     {
         return clusterSessionId[slot];
+    }
+
+    public int clientIdAt(final int slot)
+    {
+        return clientId[slot];
     }
 
     public int instrumentIdAt(final int slot)
