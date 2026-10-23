@@ -67,6 +67,9 @@ public final class VenueSimulator
     private Session session;
     private long nextQuoteReqId = 1;
     private long nextQuoteRespId = 1;
+    private long nextTradeMatchId = 1;
+    private static final String VENUE_DAY =
+        java.time.LocalDate.now(java.time.ZoneOffset.UTC).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE);
     private long rfqs;
     private long quotes;
     private long weWon;
@@ -307,6 +310,11 @@ public final class VenueSimulator
             .quoteReqID(quote.quoteReqID(), quote.quoteReqIDLength())
             .quoteRespType(weAreBest ? QuoteRespType.HIT_LIFT : QuoteRespType.PASS)
             .account(quote.account(), quote.accountLength());
+        if (weAreBest)
+        {
+            // Venue trade id, which the dealer reports as the MiFIR TVTIC.
+            quoteResponse.trdMatchID("TW" + VENUE_DAY + String.format("%010d", nextTradeMatchId++));
+        }
         if (send(quoteResponse))
         {
             if (weAreBest)

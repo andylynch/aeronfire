@@ -6,6 +6,9 @@ import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
 import io.aeron.logbuffer.Header;
 import io.aeron.samples.cluster.ClusterConfig;
+import io.aeronfire.sbe.AlgoControlsEncoder;
+import io.aeronfire.sbe.AlgoControlsStatusDecoder;
+import io.aeronfire.sbe.BooleanType;
 import io.aeronfire.sbe.CreditResetAckDecoder;
 import io.aeronfire.sbe.CreditResetEncoder;
 import io.aeronfire.sbe.MessageHeaderDecoder;
@@ -41,6 +44,7 @@ public final class RfqClient implements EgressListener
     private static final int GOT_TRADE = 2;
     private static final int GOT_REJECT = 3;
     private static final int GOT_RESET_ACK = 4;
+    private static final int GOT_ALGO_STATUS = 5;
     private static final int CLIENTS = 10; // demo clients 0..9, seeded in the cluster across all tiers
 
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
@@ -98,6 +102,7 @@ public final class RfqClient implements EgressListener
                 response = GOT_REJECT;
             }
             case CreditResetAckDecoder.TEMPLATE_ID -> response = GOT_RESET_ACK;
+            case AlgoControlsStatusDecoder.TEMPLATE_ID -> response = GOT_ALGO_STATUS;
             default ->
             {
             }
@@ -126,9 +131,13 @@ public final class RfqClient implements EgressListener
                 .egressChannel("aeron:udp?endpoint=" + egressHost + ":0")
                 .ingressChannel("aeron:udp")
                 .ingressEndpoints(ingressEndpoints)
-                .aeronDirectoryName(driver.aeronDirectoryName())))
+                .aeronDirectoryName(driver.aeronDirectoryName())
+                // Control credentials: the load test resets credit between phases, which is an admin command.
+                .credentialsSupplier(io.aeronfire.cluster.ClusterAuthenticator.controlCredentialsSupplier(
+                    env("CONTROL_SECRET", io.aeronfire.cluster.ClusterAuthenticator.DEFAULT_SECRET)))))
         {
             System.out.printf("connected, leader member %d%n", cluster.leaderMemberId());
+            client.liftThrottle(cluster);
             client.run(cluster, warmup, resetEvery, null, null);
 
             final Histogram rfqToQuote = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
@@ -160,7 +169,7 @@ public final class RfqClient implements EgressListener
             if (resetEvery > 0 && i % resetEvery == 0)
             {
                 // Untimed: a start-of-day style reset so a long load run doesn't just measure credit rejects.
-                resetEncoder.wrapAndApplyHeader(sendBuffer, 0, headerEncoder).clientId(-1);
+                resetEncoder.wrapAndApplyHeader(sendBuffer, 0, headerEncoder).clientId(-1).userId(0);
                 send(cluster, MessageHeaderEncoder.ENCODED_LENGTH + resetEncoder.encodedLength());
                 await(cluster);
             }
@@ -192,6 +201,23 @@ public final class RfqClient implements EgressListener
                 record(acceptToTrade, start);
             }
         }
+    }
+
+    /**
+     * A load test sends far more than the RTS 6 per-client throttle allows; lift it for the run (as root,
+     * journalled like any other control change). The price collar and kill switch stay in force.
+     */
+    private void liftThrottle(final AeronCluster cluster)
+    {
+        final AlgoControlsEncoder encoder = new AlgoControlsEncoder();
+        encoder.wrapAndApplyHeader(sendBuffer, 0, headerEncoder)
+            .killSwitch(BooleanType.FALSE)
+            .priceCollarBps(io.aeronfire.domain.AlgoControls.DEFAULT_PRICE_COLLAR_BPS)
+            .maxRfqsPerSecond(0)
+            .userId(0);
+        send(cluster, MessageHeaderEncoder.ENCODED_LENGTH + encoder.encodedLength());
+        await(cluster);
+        System.out.println("RTS 6 throttle lifted for the load test");
     }
 
     private void send(final AeronCluster cluster, final int length)

@@ -7,7 +7,12 @@ import io.aeron.driver.ThreadingMode;
 import io.aeron.logbuffer.Header;
 import io.aeron.samples.cluster.ClusterConfig;
 import io.aeronfire.domain.Tier;
+import io.aeronfire.sbe.AlgoControlsStatusDecoder;
 import io.aeronfire.sbe.BooleanType;
+import io.aeronfire.sbe.ClientEligibilityStatusDecoder;
+import io.aeronfire.sbe.InventoryStatusDecoder;
+import io.aeronfire.sbe.PendingChangeStatusDecoder;
+import io.aeronfire.sbe.PendingState;
 import io.aeronfire.sbe.CreditResetAckDecoder;
 import io.aeronfire.sbe.CreditStatusDecoder;
 import io.aeronfire.sbe.MessageHeaderDecoder;
@@ -44,6 +49,10 @@ public final class Monitor implements EgressListener
     private final RejectDecoder reject = new RejectDecoder();
     private final CreditStatusDecoder creditStatus = new CreditStatusDecoder();
     private final PositionStatusDecoder positionStatus = new PositionStatusDecoder();
+    private final InventoryStatusDecoder inventoryStatus = new InventoryStatusDecoder();
+    private final AlgoControlsStatusDecoder algoStatus = new AlgoControlsStatusDecoder();
+    private final ClientEligibilityStatusDecoder eligibilityStatus = new ClientEligibilityStatusDecoder();
+    private final PendingChangeStatusDecoder pendingStatus = new PendingChangeStatusDecoder();
     private final MonitorModel model = new MonitorModel();
     private volatile String json = "{}";
 
@@ -91,6 +100,29 @@ public final class Monitor implements EgressListener
             {
                 positionStatus.wrap(buffer, bodyOffset, blockLength, version);
                 model.onPosition(positionStatus.instrumentId(), positionStatus.netNotional());
+            }
+            case InventoryStatusDecoder.TEMPLATE_ID ->
+            {
+                inventoryStatus.wrap(buffer, bodyOffset, blockLength, version);
+                model.onInventory(inventoryStatus.instrumentId(), inventoryStatus.netNotional(),
+                    inventoryStatus.haltedRaw() == BooleanType.TRUE.value());
+            }
+            case AlgoControlsStatusDecoder.TEMPLATE_ID ->
+            {
+                algoStatus.wrap(buffer, bodyOffset, blockLength, version);
+                model.killSwitch = algoStatus.killSwitchRaw() == BooleanType.TRUE.value();
+            }
+            case ClientEligibilityStatusDecoder.TEMPLATE_ID ->
+            {
+                eligibilityStatus.wrap(buffer, bodyOffset, blockLength, version);
+                model.onEligibility(eligibilityStatus.clientId(),
+                    eligibilityStatus.kycValidRaw() == BooleanType.TRUE.value(),
+                    eligibilityStatus.sanctionedRaw() == BooleanType.TRUE.value());
+            }
+            case PendingChangeStatusDecoder.TEMPLATE_ID ->
+            {
+                pendingStatus.wrap(buffer, bodyOffset, blockLength, version);
+                model.onPending(pendingStatus.pendingId(), pendingStatus.state() == PendingState.PENDING);
             }
             case StateDumpEndDecoder.TEMPLATE_ID -> model.stateDumpComplete = true;
             case CreditResetAckDecoder.TEMPLATE_ID -> model.onCreditReset();

@@ -102,6 +102,7 @@
             <field name="QuoteReqID" required="Y"/>
             <field name="QuoteRespType" required="Y"/>
             <field name="Account" required="N"/>
+            <field name="TrdMatchID" required="N"/>
         </message>
         <message name="QuoteRequestReject" msgtype="AG" msgcat="app">
             <field name="QuoteReqID" required="Y"/>
@@ -115,6 +116,7 @@
             <field name="OrdStatus" required="Y"/>
             <field name="QuoteReqID" required="N"/>
             <field name="QuoteID" required="N"/>
+            <field name="TrdMatchID" required="N"/>
             <field name="Account" required="N"/>
             <component name="Instrument" required="Y"/>
             <field name="Side" required="Y"/>
@@ -259,6 +261,7 @@
             <value enum="99" description="OTHER"/>
         </field>
         <field number="693" name="QuoteRespID" type="STRING"/>
+        <field number="880" name="TrdMatchID" type="STRING"/>
         <field number="694" name="QuoteRespType" type="INT">
             <value enum="1" description="HIT_LIFT"/>
             <value enum="6" description="PASS"/>

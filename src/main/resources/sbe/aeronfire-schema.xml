@@ -3,7 +3,7 @@
                    package="io.aeronfire.sbe"
                    id="701"
                    version="1"
-                   semanticVersion="0.2.0"
+                   semanticVersion="0.4.0"
                    description="aeronfire credit RFQ messages"
                    byteOrder="littleEndian">
     <types>
@@ -17,11 +17,17 @@
             <type name="blockLength" primitiveType="uint16"/>
             <type name="numInGroup" primitiveType="uint16"/>
         </composite>
+        <composite name="varDataEncoding" description="Variable length opaque data">
+            <type name="length" primitiveType="uint32" maxValue="1073741824"/>
+            <type name="varData" primitiveType="uint8" length="0"/>
+        </composite>
 
         <!-- Prices are fixed-point: price per 100 nominal, scaled by 1e6. Notionals are whole currency units. -->
         <type name="PriceE6" primitiveType="int64"/>
         <type name="Notional" primitiveType="int64"/>
         <type name="Bps" primitiveType="int32"/>
+        <!-- Trading venue transaction id (MiFIR TVTIC, up to 52 chars; 32 is ample for the simulated venue). -->
+        <type name="VenueTxnId" primitiveType="char" length="32" characterEncoding="US-ASCII"/>
 
         <enum name="Side" encodingType="uint8">
             <validValue name="BUY">0</validValue>
@@ -44,6 +50,44 @@
             <validValue name="UNKNOWN_CLIENT">4</validValue>
             <validValue name="ABOVE_TIER_MAX">5</validValue>
             <validValue name="CREDIT_LIMIT">6</validValue>
+            <validValue name="INSTRUMENT_HALTED">7</validValue>
+            <validValue name="INVENTORY_LIMIT">8</validValue>
+            <validValue name="JOURNAL_GAP">9</validValue>
+            <validValue name="KILL_SWITCH">10</validValue>
+            <validValue name="PRICE_COLLAR">11</validValue>
+            <validValue name="THROTTLED">12</validValue>
+            <validValue name="NOT_ENTITLED">13</validValue>
+            <validValue name="NOT_AUTHENTICATED">14</validValue>
+            <validValue name="SELF_APPROVAL">15</validValue>
+            <validValue name="UNKNOWN_PENDING">16</validValue>
+            <validValue name="KYC">17</validValue>
+            <validValue name="SANCTIONS">18</validValue>
+            <validValue name="APPROVALS_FULL">19</validValue>
+        </enum>
+        <enum name="EventType" encodingType="uint8">
+            <validValue name="RFQ">0</validValue>
+            <validValue name="QUOTE">1</validValue>
+            <validValue name="REJECT">2</validValue>
+            <validValue name="TRADE">3</validValue>
+            <validValue name="CREDIT_CHANGE">4</validValue>
+            <validValue name="CREDIT_RESET">5</validValue>
+            <validValue name="INVENTORY_CHANGE">6</validValue>
+            <validValue name="POSITION_ADJUST">7</validValue>
+            <validValue name="ALGO_CONTROLS">8</validValue>
+            <validValue name="ENTITLEMENT_CHANGE">9</validValue>
+            <validValue name="PENDING_CHANGE">10</validValue>
+            <validValue name="APPROVAL">11</validValue>
+            <validValue name="ELIGIBILITY_CHANGE">12</validValue>
+        </enum>
+        <enum name="PendingState" encodingType="uint8">
+            <validValue name="PENDING">0</validValue>
+            <validValue name="APPROVED">1</validValue>
+            <validValue name="REJECTED">2</validValue>
+        </enum>
+        <enum name="AdjustReason" encodingType="uint8">
+            <validValue name="OPENING_POSITION">0</validValue>
+            <validValue name="BOOK_TRANSFER">1</validValue>
+            <validValue name="ERROR_CORRECTION">2</validValue>
         </enum>
     </types>
 
@@ -59,6 +103,7 @@
     <sbe:message name="QuoteAccept" id="2" description="Client lifts or hits a quote">
         <field name="rfqId" id="1" type="int64"/>
         <field name="quoteId" id="2" type="int64"/>
+        <field name="venueTxnId" id="3" type="VenueTxnId" description="Venue's trade id (TVTIC); blank off-venue"/>
     </sbe:message>
 
     <sbe:message name="CreditUpdate" id="3" description="Admin: create or change a client's credit line">
@@ -66,14 +111,70 @@
         <field name="tier" id="2" type="Tier"/>
         <field name="creditLimit" id="3" type="Notional"/>
         <field name="resetUtilisation" id="4" type="BooleanType"/>
+        <field name="userId" id="5" type="int32" description="Control-plane user making the change"/>
     </sbe:message>
 
     <sbe:message name="CreditReset" id="4" description="Admin: start-of-day reset of utilisation">
         <field name="clientId" id="1" type="int32" description="-1 resets every client"/>
+        <field name="userId" id="2" type="int32"/>
     </sbe:message>
 
     <sbe:message name="Subscribe" id="5" description="Monitor: receive a copy of all flow, starting with a state dump">
         <field name="sendStateDump" id="1" type="BooleanType"/>
+    </sbe:message>
+
+    <sbe:message name="InventoryLimit" id="6" description="Admin: inventory limits and quoting halt for an instrument">
+        <field name="instrumentId" id="1" type="int32"/>
+        <field name="maxLong" id="2" type="Notional"/>
+        <field name="maxShort" id="3" type="Notional" description="Positive number: largest allowed short"/>
+        <field name="halted" id="4" type="BooleanType"/>
+        <field name="userId" id="5" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="PositionAdjust" id="7" description="Admin: manual position change outside RFQ flow">
+        <field name="instrumentId" id="1" type="int32"/>
+        <field name="delta" id="2" type="Notional"/>
+        <field name="reason" id="3" type="AdjustReason"/>
+        <field name="userId" id="4" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="EventFeedRequest" id="8" description="Post-trade: send journalled events from a sequence number">
+        <field name="fromSeq" id="1" type="int64"/>
+        <field name="maxEvents" id="2" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="AlgoControls" id="9" description="Admin: MiFID II RTS 6 controls for the auto-quoter">
+        <field name="killSwitch" id="1" type="BooleanType" description="Engaged: reject every RFQ and accept"/>
+        <field name="priceCollarBps" id="2" type="int32" description="Max quote deviation from reference price"/>
+        <field name="maxRfqsPerSecond" id="3" type="int32" description="Per-client RFQ throttle"/>
+        <field name="userId" id="4" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="SetEntitlement" id="40" description="Admin: grant or change a control-plane user's entitlements">
+        <field name="userId" id="1" type="int32"/>
+        <field name="targetUserId" id="2" type="int32"/>
+        <field name="permissions" id="3" type="int32" description="Bit set, see Entitlements"/>
+        <field name="allClients" id="4" type="BooleanType"/>
+        <field name="instrumentScope" id="5" type="int32" description="Bit per instrument"/>
+        <field name="maxCreditLimit" id="6" type="Notional"/>
+        <field name="maxAdjust" id="7" type="Notional"/>
+        <field name="maxInventoryLimit" id="8" type="Notional"/>
+        <group name="clients" id="9" dimensionType="groupSizeEncoding">
+            <field name="clientId" id="10" type="int32"/>
+        </group>
+    </sbe:message>
+
+    <sbe:message name="Approval" id="41" description="Four-eyes: approve or reject a pending change">
+        <field name="userId" id="1" type="int32"/>
+        <field name="pendingId" id="2" type="int64"/>
+        <field name="approve" id="3" type="BooleanType"/>
+    </sbe:message>
+
+    <sbe:message name="ClientEligibility" id="42" description="Reference data: KYC and sanctions status for a client">
+        <field name="userId" id="1" type="int32"/>
+        <field name="clientId" id="2" type="int32"/>
+        <field name="kycValid" id="3" type="BooleanType"/>
+        <field name="sanctioned" id="4" type="BooleanType"/>
     </sbe:message>
 
     <!-- Egress: cluster to client or gateway -->
@@ -100,6 +201,7 @@
         <field name="price" id="8" type="PriceE6"/>
         <field name="executedAt" id="9" type="int64" description="Cluster time, ms"/>
         <field name="clientUtilised" id="10" type="Notional" description="Client credit used after this trade"/>
+        <field name="venueTxnId" id="11" type="VenueTxnId"/>
     </sbe:message>
 
     <sbe:message name="Reject" id="12" description="Request rejected">
@@ -130,6 +232,90 @@
         <field name="nextTradeId" id="2" type="int64"/>
     </sbe:message>
 
+    <sbe:message name="InventoryStatus" id="17" description="An instrument's limits, halt and position">
+        <field name="instrumentId" id="1" type="int32"/>
+        <field name="maxLong" id="2" type="Notional"/>
+        <field name="maxShort" id="3" type="Notional"/>
+        <field name="halted" id="4" type="BooleanType"/>
+        <field name="netNotional" id="5" type="Notional"/>
+    </sbe:message>
+
+    <!--
+        Audit event journal record. Every state change the cluster makes, in sequence: the order and transaction
+        record (MiFIR Art 25) and the source of the guaranteed post-trade feed. Field use by type:
+          RFQ               rfqId clientId instrumentId side notional
+          QUOTE             rfqId quoteId clientId instrumentId side notional price spreadBps amount1=validUntil
+          REJECT            rfqId|quoteId clientId instrumentId code=reason amount1=rejectedTemplateId
+          TRADE             tradeId rfqId quoteId clientId instrumentId side notional price venueTxnId
+          CREDIT_CHANGE     clientId code=tier amount1=limit amount2=utilised
+          CREDIT_RESET      clientId (-1 = all)
+          INVENTORY_CHANGE  instrumentId code=halted amount1=maxLong amount2=maxShort
+          POSITION_ADJUST   instrumentId notional=delta code=reason amount1=new net
+          ALGO_CONTROLS     code=killSwitch amount1=priceCollarBps amount2=maxRfqsPerSecond
+          ENTITLEMENT_CHANGE clientId=targetUserId code=0 amount1=permissions amount2=instrumentScope
+          PENDING_CHANGE    tradeId=pendingId code=0 amount1=templateId
+          APPROVAL          tradeId=pendingId code=1 approved / 0 rejected amount1=templateId amount2=requestedBy
+          ELIGIBILITY_CHANGE clientId code=bit0 kycValid, bit1 sanctioned
+        userId is set on every admin event.
+    -->
+    <sbe:message name="EventRecord" id="19" description="One journalled event, sent on the event feed">
+        <field name="seq" id="1" type="int64"/>
+        <field name="eventType" id="2" type="EventType"/>
+        <field name="timestamp" id="3" type="int64" description="Cluster time, UTC epoch ms"/>
+        <field name="rfqId" id="4" type="int64"/>
+        <field name="quoteId" id="5" type="int64"/>
+        <field name="tradeId" id="6" type="int64"/>
+        <field name="clientId" id="7" type="int32"/>
+        <field name="instrumentId" id="8" type="int32"/>
+        <field name="side" id="9" type="Side"/>
+        <field name="notional" id="10" type="Notional"/>
+        <field name="price" id="11" type="PriceE6"/>
+        <field name="spreadBps" id="12" type="Bps"/>
+        <field name="code" id="13" type="uint8" description="Reject reason, tier, halt flag or adjust reason, by type"/>
+        <field name="amount1" id="14" type="int64" description="Valid-until, limit, max long or new net, by type"/>
+        <field name="amount2" id="15" type="int64" description="Utilised or max short, by type"/>
+        <field name="venueTxnId" id="16" type="VenueTxnId"/>
+        <field name="userId" id="17" type="int32" description="Control-plane user for admin events, else -1"/>
+    </sbe:message>
+
+    <sbe:message name="AlgoControlsStatus" id="28" description="Current RTS 6 controls">
+        <field name="killSwitch" id="1" type="BooleanType"/>
+        <field name="priceCollarBps" id="2" type="int32"/>
+        <field name="maxRfqsPerSecond" id="3" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="PendingChangeStatus" id="29" description="A change waiting for, or decided by, a second user">
+        <field name="pendingId" id="1" type="int64"/>
+        <field name="requestedBy" id="2" type="int32"/>
+        <field name="templateId" id="3" type="uint16"/>
+        <field name="state" id="4" type="PendingState"/>
+        <field name="decidedBy" id="5" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="EntitlementStatus" id="30" description="A user's entitlements">
+        <field name="targetUserId" id="1" type="int32"/>
+        <field name="permissions" id="2" type="int32"/>
+        <field name="allClients" id="3" type="BooleanType"/>
+        <field name="instrumentScope" id="4" type="int32"/>
+        <field name="maxCreditLimit" id="5" type="Notional"/>
+        <field name="maxAdjust" id="6" type="Notional"/>
+        <field name="maxInventoryLimit" id="7" type="Notional"/>
+        <field name="clientCount" id="8" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="ClientEligibilityStatus" id="34" description="A client's KYC and sanctions status">
+        <field name="clientId" id="1" type="int32"/>
+        <field name="kycValid" id="2" type="BooleanType"/>
+        <field name="sanctioned" id="3" type="BooleanType"/>
+    </sbe:message>
+
+    <sbe:message name="EventFeedBatchEnd" id="18" description="End of an event feed batch">
+        <field name="fromSeq" id="1" type="int64"/>
+        <field name="count" id="2" type="int32"/>
+        <field name="nextSeq" id="3" type="int64" description="Journal high-water mark"/>
+        <field name="oldestSeq" id="4" type="int64" description="Oldest sequence still held"/>
+    </sbe:message>
+
     <!--
         Snapshot: written by the clustered service, read back on restart.
         One small message per record keeps each well under the snapshot publication's max message length,
@@ -138,6 +324,7 @@
     <sbe:message name="BookSnapshot" id="20" description="Counters and positions">
         <field name="nextQuoteId" id="1" type="int64"/>
         <field name="nextTradeId" id="2" type="int64"/>
+        <field name="nextPendingId" id="6" type="int64"/>
         <group name="positions" id="3" dimensionType="groupSizeEncoding">
             <field name="instrumentId" id="4" type="int32"/>
             <field name="netNotional" id="5" type="Notional"/>
@@ -165,6 +352,66 @@
 
     <sbe:message name="SubscriberSnapshot" id="24" description="One monitor subscription">
         <field name="clusterSessionId" id="1" type="int64"/>
+    </sbe:message>
+
+    <sbe:message name="InventorySnapshot" id="25" description="One instrument's limits and halt">
+        <field name="instrumentId" id="1" type="int32"/>
+        <field name="maxLong" id="2" type="Notional"/>
+        <field name="maxShort" id="3" type="Notional"/>
+        <field name="halted" id="4" type="BooleanType"/>
+    </sbe:message>
+
+    <sbe:message name="JournalEventSnapshot" id="26" description="One journalled event">
+        <field name="seq" id="1" type="int64"/>
+        <field name="eventType" id="2" type="EventType"/>
+        <field name="timestamp" id="3" type="int64" description="Cluster time, UTC epoch ms"/>
+        <field name="rfqId" id="4" type="int64"/>
+        <field name="quoteId" id="5" type="int64"/>
+        <field name="tradeId" id="6" type="int64"/>
+        <field name="clientId" id="7" type="int32"/>
+        <field name="instrumentId" id="8" type="int32"/>
+        <field name="side" id="9" type="Side"/>
+        <field name="notional" id="10" type="Notional"/>
+        <field name="price" id="11" type="PriceE6"/>
+        <field name="spreadBps" id="12" type="Bps"/>
+        <field name="code" id="13" type="uint8" description="Reject reason, tier, halt flag or adjust reason, by type"/>
+        <field name="amount1" id="14" type="int64" description="Valid-until, limit, max long or new net, by type"/>
+        <field name="amount2" id="15" type="int64" description="Utilised or max short, by type"/>
+        <field name="venueTxnId" id="16" type="VenueTxnId"/>
+        <field name="userId" id="17" type="int32" description="Control-plane user for admin events, else -1"/>
+    </sbe:message>
+
+    <sbe:message name="AlgoControlsSnapshot" id="27" description="RTS 6 controls">
+        <field name="killSwitch" id="1" type="BooleanType"/>
+        <field name="priceCollarBps" id="2" type="int32"/>
+        <field name="maxRfqsPerSecond" id="3" type="int32"/>
+    </sbe:message>
+
+    <sbe:message name="EntitlementSnapshot" id="31" description="One user's entitlements">
+        <field name="targetUserId" id="1" type="int32"/>
+        <field name="permissions" id="2" type="int32"/>
+        <field name="allClients" id="3" type="BooleanType"/>
+        <field name="instrumentScope" id="4" type="int32"/>
+        <field name="maxCreditLimit" id="5" type="Notional"/>
+        <field name="maxAdjust" id="6" type="Notional"/>
+        <field name="maxInventoryLimit" id="7" type="Notional"/>
+        <group name="clients" id="8" dimensionType="groupSizeEncoding">
+            <field name="clientId" id="9" type="int32"/>
+        </group>
+    </sbe:message>
+
+    <sbe:message name="PendingChangeSnapshot" id="32" description="One change awaiting approval, with its original command">
+        <field name="pendingId" id="1" type="int64"/>
+        <field name="requestedBy" id="2" type="int32"/>
+        <field name="templateId" id="3" type="uint16"/>
+        <field name="requestedAt" id="4" type="int64"/>
+        <data name="command" id="5" type="varDataEncoding"/>
+    </sbe:message>
+
+    <sbe:message name="ClientEligibilitySnapshot" id="33" description="One client's KYC and sanctions status">
+        <field name="clientId" id="1" type="int32"/>
+        <field name="kycValid" id="2" type="BooleanType"/>
+        <field name="sanctioned" id="3" type="BooleanType"/>
     </sbe:message>
 
     <sbe:message name="SnapshotEnd" id="22" description="Marks a complete snapshot">

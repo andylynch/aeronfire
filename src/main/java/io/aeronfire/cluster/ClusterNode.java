@@ -34,6 +34,8 @@ public final class ClusterNode
         final ClusterConfig config = ClusterConfig.create(nodeId, hosts, hosts, portBase, new RfqClusteredService());
         // ClusterConfig doesn't set this; the member's own ingress endpoint comes from the cluster members string.
         config.consensusModuleContext().ingressChannel("aeron:udp?term-length=64k");
+        final String controlSecret = env("CONTROL_SECRET", ClusterAuthenticator.DEFAULT_SECRET);
+        config.consensusModuleContext().authenticatorSupplier(() -> new ClusterAuthenticator(controlSecret));
         config.mediaDriverContext().errorHandler(errorHandler(nodeId, "media driver"));
         config.archiveContext().errorHandler(errorHandler(nodeId, "archive"));
         config.aeronArchiveContext().errorHandler(errorHandler(nodeId, "archive client"));

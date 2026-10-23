@@ -48,6 +48,14 @@ public final class MonitorModel
     private final RateMeter quoteRate = new RateMeter();
     private final RateMeter tradeRate = new RateMeter();
 
+    // controls
+    boolean killSwitch;
+    int pendingApprovals;
+    final java.util.Set<Long> pendingIds = new java.util.HashSet<>();
+    final boolean[] halted = new boolean[Instruments.COUNT];
+    final boolean[] kycBlocked = new boolean[CreditBook.CAPACITY];
+    final boolean[] sanctioned = new boolean[CreditBook.CAPACITY];
+
     // book
     final long[] positions = new long[Instruments.COUNT];
     final boolean[] knownClient = new boolean[CreditBook.CAPACITY];
@@ -109,6 +117,37 @@ public final class MonitorModel
         {
             positions[instrumentId] = net;
         }
+    }
+
+    void onInventory(final int instrumentId, final long net, final boolean isHalted)
+    {
+        if (Instruments.isValid(instrumentId))
+        {
+            positions[instrumentId] = net;
+            halted[instrumentId] = isHalted;
+        }
+    }
+
+    void onEligibility(final int clientId, final boolean kycValid, final boolean isSanctioned)
+    {
+        if (CreditBook.isValidId(clientId))
+        {
+            kycBlocked[clientId] = !kycValid;
+            sanctioned[clientId] = isSanctioned;
+        }
+    }
+
+    void onPending(final long pendingId, final boolean open)
+    {
+        if (open)
+        {
+            pendingIds.add(pendingId);
+        }
+        else
+        {
+            pendingIds.remove(pendingId);
+        }
+        pendingApprovals = pendingIds.size();
     }
 
     void onCreditReset()
@@ -182,6 +221,8 @@ public final class MonitorModel
             .append(",\"leaderChanges\":").append(leaderChanges)
             .append(",\"synced\":").append(stateDumpComplete)
             .append(",\"lastEventAgoMs\":").append(lastEventMs == 0 ? -1 : nowMs - lastEventMs)
+            .append(",\"killSwitch\":").append(killSwitch)
+            .append(",\"pendingApprovals\":").append(pendingApprovals)
             .append("},");
 
         sb.append("\"flow\":{\"quotes\":").append(quotes)
@@ -213,6 +254,7 @@ public final class MonitorModel
                 .append("{\"id\":").append(i)
                 .append(",\"name\":\"").append(Instruments.name(i)).append('"')
                 .append(",\"net\":").append(positions[i])
+                .append(",\"halted\":").append(halted[i])
                 .append(",\"mark\":").append(round(markValue(i), 0))
                 .append(",\"cs01\":").append(round(cs01, 0))
                 .append('}');
@@ -231,6 +273,8 @@ public final class MonitorModel
                     .append(",\"limit\":").append(limit[id])
                     .append(",\"utilised\":").append(utilised[id])
                     .append(",\"trades\":").append(clientTrades[id])
+                    .append(",\"kycBlocked\":").append(kycBlocked[id])
+                    .append(",\"sanctioned\":").append(sanctioned[id])
                     .append('}');
                 first = false;
             }

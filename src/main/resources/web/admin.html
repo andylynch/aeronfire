@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aeronfire control</title>
+<style>
+  :root {
+    --bg: #0b0e13; --panel: #121721; --line: #1f2633; --text: #d7dde8; --muted: #7d8799;
+    --ok: #3ecf8e; --bad: #ff6b6b; --warn: #f2b84b; --accent: #6ea8ff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+  header { display: flex; gap: 16px; align-items: center; padding: 14px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 16px; }
+  header .sub { color: var(--muted); }
+  .right { margin-left: auto; display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
+  .ks { padding: 4px 10px; border-radius: 4px; font-weight: 600; }
+  .ks.on { background: var(--bad); color: #000; } .ks.off { border: 1px solid var(--line); color: var(--muted); }
+  main { display: grid; gap: 14px; padding: 16px 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+  section.wide { grid-column: span 2; }
+  h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  td { padding: 4px 6px; border-bottom: 1px solid #161c27; white-space: nowrap; }
+  td.num { text-align: right; }
+  .scroll { overflow-x: auto; }
+  form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  input, select { background: #0e131b; border: 1px solid var(--line); color: var(--text); border-radius: 4px; padding: 5px 7px; font: 12px var(--mono); width: 92px; }
+  input.wide { width: 170px; }
+  button { background: #1b2433; border: 1px solid #2a3547; color: var(--text); border-radius: 4px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.danger { border-color: #5a2a2a; color: var(--bad); }
+  button.go { border-color: #1f4a37; color: var(--ok); }
+  .flag { font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 4px; }
+  .flag.bad { background: #3a1717; color: var(--bad); } .flag.warn { background: #3a2e14; color: var(--warn); }
+  .muted { color: var(--muted); }
+  #toast { position: fixed; right: 16px; bottom: 16px; max-width: min(560px, calc(100vw - 32px)); padding: 10px 14px; border-radius: 6px;
+           background: var(--panel); border: 1px solid var(--line); font-family: var(--mono); font-size: 12px; display: none; }
+  #toast.APPLIED { border-color: var(--ok); } #toast.PENDING { border-color: var(--warn); } #toast.REJECTED, #toast.UNKNOWN { border-color: var(--bad); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px; } section.wide { grid-column: span 1; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>aeronfire control</h1>
+  <span class="sub">entitled, four-eyes, journalled</span>
+  <div class="right">
+    <span id="me" class="muted"></span>
+    <span id="leader" class="muted"></span>
+    <span id="ks" class="ks off">kill switch off</span>
+    <button class="danger" onclick="act({op:'engageKillSwitch'})">Engage kill switch</button>
+    <button onclick="act({op:'releaseKillSwitch'})">Release (four-eyes)</button>
+  </div>
+</header>
+<main>
+  <section class="wide">
+    <h2>Pending approvals (four-eyes)</h2>
+    <div class="scroll"><table><thead><tr><th>#</th><th>Change</th><th>Requested by</th><th></th></tr></thead><tbody id="pending"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Credit lines</h2>
+    <div class="scroll"><table><thead><tr><th>Client</th><th>Tier</th><th class="num">Limit</th><th class="num">Used</th><th>Status</th></tr></thead><tbody id="credit"></tbody></table></div>
+    <form onsubmit="return submitForm(this, 'creditLine')">
+      <input name="clientId" placeholder="client" required>
+      <select name="tier"><option value="1">tier 1</option><option value="2" selected>tier 2</option><option value="3">tier 3</option></select>
+      <input name="limitMm" placeholder="limit mm" required>
+      <button>Set line</button>
+    </form>
+    <form onsubmit="return submitForm(this, 'creditReset')">
+      <input name="clientId" placeholder="client / -1" required>
+      <button>Reset utilisation</button>
+    </form>
+    <form onsubmit="return submitForm(this, 'eligibility')">
+      <input name="clientId" placeholder="client" required>
+      <select name="kycValid"><option value="true">KYC valid</option><option value="false">KYC invalid</option></select>
+      <select name="sanctioned"><option value="false">not sanctioned</option><option value="true">sanctioned</option></select>
+      <button>Set eligibility</button>
+    </form>
+  </section>
+
+  <section>
+    <h2>Inventory</h2>
+    <div class="scroll"><table><thead><tr><th>Bond</th><th class="num">Net</th><th class="num">Max long</th><th class="num">Max short</th><th></th></tr></thead><tbody id="inventory"></tbody></table></div>
+    <form onsubmit="return submitForm(this, 'inventoryLimits')">
+      <input name="instrumentId" placeholder="bond id" required>
+      <input name="maxLongMm" placeholder="max long mm" required>
+      <input name="maxShortMm" placeholder="max short mm" required>
+      <button>Set limits</button>
+    </form>
+    <form onsubmit="return submitForm(this, 'adjust')">
+      <input name="instrumentId" placeholder="bond id" required>
+      <input name="deltaMm" placeholder="delta mm" required>
+      <select name="reason"><option>OPENING_POSITION</option><option>BOOK_TRANSFER</option><option>ERROR_CORRECTION</option></select>
+      <button>Adjust position</button>
+    </form>
+    <form onsubmit="return submitForm(this, 'algo')">
+      <input name="collarBps" placeholder="collar bps" required>
+      <input name="maxRfqs" placeholder="RFQs/s/client" required>
+      <button>Set RTS 6 controls</button>
+      <span class="muted" id="algo"></span>
+    </form>
+  </section>
+
+  <section class="wide">
+    <h2>Users &amp; entitlements</h2>
+    <div class="scroll"><table><thead><tr><th>User</th><th>Permissions</th><th>Clients</th><th>Bonds</th><th class="num">Max credit</th><th class="num">Max adjust</th><th class="num">Max inventory</th></tr></thead><tbody id="users"></tbody></table></div>
+    <form onsubmit="return submitForm(this, 'grant')">
+      <input name="target" placeholder="user" required>
+      <input class="wide" name="perms" placeholder="CREDIT,APPROVE,…" required>
+      <input name="clients" placeholder="ALL or 1,2" value="ALL">
+      <input name="instruments" placeholder="ALL or 0,1" value="ALL">
+      <input name="maxCreditMm" placeholder="max credit mm">
+      <input name="maxAdjustMm" placeholder="max adjust mm">
+      <input name="maxInventoryMm" placeholder="max inv mm">
+      <button>Grant (four-eyes)</button>
+    </form>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const mm = (n) => n >= 9e18 ? '∞' : (n / 1e6).toFixed(1) + 'mm';
+
+  async function act(params) {
+    const body = new URLSearchParams(params);
+    const res = await fetch('/api/do', { method: 'POST', body });
+    const { result } = await res.json();
+    const toast = $('toast');
+    toast.textContent = result;
+    toast.className = result.split(/[ :]/)[0];
+    toast.style.display = 'block';
+    clearTimeout(window.toastTimer);
+    window.toastTimer = setTimeout(() => toast.style.display = 'none', 6000);
+    refresh();
+    return false;
+  }
+
+  function submitForm(form, op) {
+    act({ op, ...Object.fromEntries(new FormData(form)) });
+    return false;
+  }
+
+  async function refresh() {
+    const s = await (await fetch('/api/state')).json();
+    $('me').textContent = `logged in as ${s.me}`;
+    $('leader').textContent = s.leader >= 0 ? `leader ${s.leader}` : 'no leader';
+    $('ks').className = 'ks ' + (s.killSwitch ? 'on' : 'off');
+    $('ks').textContent = s.killSwitch ? 'KILL SWITCH ENGAGED' : 'kill switch off';
+    $('algo').textContent = `collar ${s.priceCollarBps}bp · ${s.maxRfqsPerSecond || '∞'} RFQs/s`;
+
+    $('pending').innerHTML = s.pending.length ? s.pending.map(p =>
+      `<tr><td>${p.id}</td><td>${p.what}</td><td>${p.by}</td><td>` +
+      `<button class="go" onclick="act({op:'approve',id:${p.id}})">Approve</button> ` +
+      `<button class="danger" onclick="act({op:'reject',id:${p.id}})">Reject</button></td></tr>`).join('')
+      : '<tr><td colspan="4" class="muted">nothing waiting</td></tr>';
+
+    $('credit').innerHTML = s.credit.map(c =>
+      `<tr><td>${c.client}</td><td>T${c.tier}</td><td class="num">${mm(c.limit)}</td><td class="num">${mm(c.utilised)}</td><td>` +
+      (c.sanctioned ? '<span class="flag bad">SANCTIONED</span>' : '') +
+      (c.kycValid ? '' : '<span class="flag warn">KYC</span>') + '</td></tr>').join('');
+
+    $('inventory').innerHTML = s.inventory.map(i =>
+      `<tr><td>${i.id} ${i.name}${i.halted ? '<span class="flag bad">HALTED</span>' : ''}</td>` +
+      `<td class="num">${mm(i.net)}</td><td class="num">${mm(i.maxLong)}</td><td class="num">${mm(i.maxShort)}</td><td>` +
+      (i.halted ? `<button class="go" onclick="act({op:'resume',instrumentId:${i.id}})">Resume</button>`
+                : `<button class="danger" onclick="act({op:'halt',instrumentId:${i.id}})">Halt</button>`) + '</td></tr>').join('');
+
+    $('users').innerHTML = s.users.map(u =>
+      `<tr><td>${u.user}</td><td>${u.perms}</td><td>${u.clients}</td><td>${u.instruments}</td>` +
+      `<td class="num">${mm(u.maxCredit)}</td><td class="num">${mm(u.maxAdjust)}</td><td class="num">${mm(u.maxInventory)}</td></tr>`).join('');
+  }
+
+  refresh();
+  setInterval(refresh, 1000);
+</script>
+</body>
+</html>

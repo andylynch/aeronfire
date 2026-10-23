@@ -18,6 +18,7 @@ repositories {
 
 val sbeCodegen: Configuration by configurations.creating
 val fixCodegen: Configuration by configurations.creating
+val jolokiaAgent: Configuration by configurations.creating { isTransitive = false }
 
 dependencies {
     implementation(libs.aeron.client)
@@ -32,6 +33,7 @@ dependencies {
 
     sbeCodegen(libs.sbe.tool)
     fixCodegen(libs.artio.codecs)
+    jolokiaAgent(variantOf(libs.jolokia.agent) { classifier("javaagent") })
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -107,6 +109,7 @@ val launchers = mapOf(
     "fix-gateway" to "io.aeronfire.gateway.FixGateway",
     "venue-sim" to "io.aeronfire.venue.VenueSimulator",
     "monitor" to "io.aeronfire.monitor.Monitor",
+    "control" to "io.aeronfire.control.ControlPlane",
 )
 
 val extraStartScripts = launchers.map { (name, main) ->
@@ -123,6 +126,11 @@ distributions {
     main {
         contents {
             extraStartScripts.forEach { from(it) { into("bin") } }
+            // Jolokia JVM agent, attached to the control plane with -javaagent (see docker-compose.yml).
+            from(jolokiaAgent) {
+                into("agent")
+                rename { "jolokia-agent.jar" }
+            }
         }
     }
 }
@@ -150,6 +158,17 @@ tasks.register<JavaExec>("runMonitor") {
     mainClass = "io.aeronfire.monitor.Monitor"
     jvmArgs(aeronJvmArgs)
     standardInput = System.`in`
+}
+
+tasks.register<JavaExec>("runControl") {
+    description = "Runs the control plane: MBeans + Jolokia (:8778) + admin page (http://localhost:8090)."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.control.ControlPlane"
+    jvmArgs(aeronJvmArgs)
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-javaagent:${jolokiaAgent.singleFile.absolutePath}=port=8778,host=localhost")
+    })
 }
 
 tasks.register<JavaExec>("runClient") {

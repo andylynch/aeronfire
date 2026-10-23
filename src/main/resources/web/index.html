@@ -43,6 +43,11 @@
   .t-QUOTE { color: var(--accent); } .t-TRADE { color: var(--buy); } .t-REJECT { color: var(--sell); }
   .reasons { margin-top: 8px; color: var(--warn); font-family: var(--mono); font-size: 12px; min-height: 1em; }
   .scroll { overflow-x: auto; }
+  .killbanner { display: none; background: #4a1414; color: #ffb3b3; padding: 8px 20px; font-weight: 600; letter-spacing: .03em; }
+  .adminlink { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .pendingtag { font-size: 11px; color: var(--warn); }
+  .flag { font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 6px; }
+  .flag.bad { background: #3a1717; color: var(--sell); } .flag.warn { background: #3a2e14; color: var(--warn); }
   @media (max-width: 900px) {
     .kpis { grid-template-columns: repeat(2, 1fr); }
     .positions, .credit { grid-column: span 12; }
@@ -54,12 +59,15 @@
 <header>
   <h1>aeronfire</h1>
   <span class="sub">credit RFQ engine · Aeron Cluster</span>
+  <a class="adminlink" href="http://localhost:8090/" target="_blank">control ↗</a>
+  <span id="pending" class="pendingtag"></span>
   <div class="health">
     <span><span id="dot" class="dot"></span><span id="leader">connecting…</span></span>
     <span class="muted" id="term"></span>
     <span class="muted" id="changes"></span>
   </div>
 </header>
+<div id="killbanner" class="killbanner">KILL SWITCH ENGAGED: all RFQs and accepts are being rejected (RTS 6)</div>
 <main>
   <section class="kpis">
     <div class="kpi"><div class="label">Quotes</div><div class="value" id="quotes">0</div><div class="rate" id="qps"></div></div>
@@ -108,6 +116,8 @@
     $('leader').textContent = c.leader >= 0 ? `leader ${c.leader}` : 'no leader';
     $('term').textContent = c.term >= 0 ? `term ${c.term}` : '';
     $('changes').textContent = `failovers ${c.leaderChanges}${c.synced ? '' : ' · syncing'}`;
+    $('killbanner').style.display = c.killSwitch ? 'block' : 'none';
+    $('pending').textContent = c.pendingApprovals ? `${c.pendingApprovals} awaiting approval` : '';
 
     const f = s.flow;
     $('quotes').textContent = f.quotes.toLocaleString('en-GB');
@@ -121,14 +131,16 @@
     $('reasons').textContent = Object.entries(f.rejectsByReason).map(([k, v]) => `${k} ${v}`).join('   ');
 
     $('positions').innerHTML = s.positions.map(p =>
-      `<tr><td>${p.name}</td><td class="num">${signed(p.net, mm(p.net))}</td>` +
+      `<tr><td>${p.name}${p.halted ? '<span class="flag bad">HALTED</span>' : ''}</td><td class="num">${signed(p.net, mm(p.net))}</td>` +
       `<td class="num">${money(p.mark)}</td><td class="num">${signed(p.cs01, money(p.cs01))}</td></tr>`).join('') +
       `<tr class="total"><td>Total</td><td></td><td></td><td class="num">${signed(s.totalCs01, money(s.totalCs01))}</td></tr>`;
 
     $('credit').innerHTML = s.credit.map(cl => {
       const u = cl.limit ? cl.utilised / cl.limit : 0;
       const level = u > 0.9 ? 'high' : u > 0.6 ? 'mid' : '';
-      return `<tr><td>${cl.client}</td><td><span class="tag">T${cl.tier}</span></td>` +
+      const flags = (cl.sanctioned ? '<span class="flag bad">SANCTIONED</span>' : '') +
+        (cl.kycBlocked ? '<span class="flag warn">KYC</span>' : '');
+      return `<tr><td>${cl.client}${flags}</td><td><span class="tag">T${cl.tier}</span></td>` +
         `<td class="num">${mm(cl.limit)}</td><td class="num">${mm(cl.utilised)}</td>` +
         `<td><div class="bar ${level}"><span style="width:${Math.min(100, 100 * u).toFixed(1)}%"></span></div></td>` +
         `<td class="num">${cl.trades}</td></tr>`;

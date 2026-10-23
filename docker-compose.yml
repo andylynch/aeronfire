@@ -2,6 +2,8 @@
 #   docker compose up -d --build             # cluster + gateway + web blotter (http://localhost:8080)
 #   docker compose run --rm venue            # Tradeweb-style venue over FIX
 #   docker compose run --rm tui              # terminal blotter
+#   control plane: http://localhost:8090 (users root/risk/ops/deskhead/compliance/sales, password = name)
+#                  Jolokia on :8778
 #   docker compose run --rm client           # raw cluster load test (no FIX)
 #   docker compose kill <leader>             # watch a new leader take over
 x-node: &node
@@ -11,6 +13,7 @@ x-node: &node
   environment: &node-env
     CLUSTER_HOSTS: node0,node1,node2
     PORT_BASE: "9000"
+    CONTROL_SECRET: ${CONTROL_SECRET:-dev-control-secret}
   restart: "no"
 
 services:
@@ -65,6 +68,24 @@ services:
       - "8080:8080"
     depends_on: [node0, node1, node2]
 
+  control:
+    image: aeronfire:local
+    hostname: control
+    shm_size: 512m
+    entrypoint: ["/app/bin/control"]
+    environment:
+      CLUSTER_HOSTS: node0,node1,node2
+      PORT_BASE: "9000"
+      EGRESS_HOST: control
+      CONTROL_SECRET: ${CONTROL_SECRET:-dev-control-secret}
+      ADMIN_HTTP_PORT: "8090"
+      # Jolokia: JMX as JSON over HTTP, e.g. curl -u jolokia:jolokia localhost:8778/jolokia/read/aeronfire:type=Credit
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8778,host=0.0.0.0,user=jolokia,password=jolokia
+    ports:
+      - "8090:8090"
+      - "8778:8778"
+    depends_on: [node0, node1, node2]
+
   tui:
     image: aeronfire:local
     profiles: [tui]
@@ -104,6 +125,7 @@ services:
       CLUSTER_HOSTS: node0,node1,node2
       PORT_BASE: "9000"
       EGRESS_HOST: client
+      CONTROL_SECRET: ${CONTROL_SECRET:-dev-control-secret}
       RFQ_COUNT: "20000"
       WARMUP_COUNT: "5000"
     depends_on: [node0, node1, node2]

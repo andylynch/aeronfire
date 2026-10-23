@@ -111,6 +111,7 @@ public final class FixGateway implements EgressListener
         final char side;
         final long notional;
         long quoteId = -1;
+        String venueTxnId;
 
         PendingRfq(
             final long rfqId,
@@ -294,9 +295,12 @@ public final class FixGateway implements EgressListener
         if (fixQuoteResponse.quoteRespType() == QuoteRespType.HIT_LIFT.representation())
         {
             stats.hits++;
+            // The venue's trade id (FIX TrdMatchID) is the MiFIR TVTIC; carry it onto the trade.
+            rfq.venueTxnId = fixQuoteResponse.trdMatchIDAsString();
             acceptEncoder.wrapAndApplyHeader(ingressBuffer, 0, headerEncoder)
                 .rfqId(rfq.rfqId)
-                .quoteId(quoteId);
+                .quoteId(quoteId)
+                .venueTxnId(rfq.venueTxnId == null ? "" : rfq.venueTxnId);
             offerToCluster(MessageHeaderEncoder.ENCODED_LENGTH + acceptEncoder.encodedLength());
         }
         else
@@ -407,6 +411,7 @@ public final class FixGateway implements EgressListener
             .ordStatus(OrdStatus.FILLED)
             .quoteReqID(rfq.quoteReqId)
             .quoteID(Long.toString(clusterTrade.quoteId()))
+            .trdMatchID(rfq.venueTxnId == null ? "" : rfq.venueTxnId)
             .account(rfq.account)
             .side(rfq.side)
             .lastQty(clusterTrade.notional(), 0)

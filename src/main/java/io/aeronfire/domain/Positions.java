@@ -22,6 +22,17 @@ public final class Positions
         netNotional[instrumentId] += clientBuys ? -notional : notional;
     }
 
+    /**
+     * Manual adjustment outside the RFQ flow (opening position, book transfer, error correction).
+     *
+     * @return the new net position.
+     */
+    public long adjust(final int instrumentId, final long delta)
+    {
+        netNotional[instrumentId] += delta;
+        return netNotional[instrumentId];
+    }
+
     public void set(final int instrumentId, final long net)
     {
         netNotional[instrumentId] = net;
