@@ -18,6 +18,9 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon --console=plain 2>&1 | tee build.log
         shell: bash -o pipefail {0}
+      - name: Failover test (kill the leader mid-flow)
+        run: ./gradlew failoverTest --no-daemon --console=plain 2>&1 | tee -a build.log
+        shell: bash -o pipefail {0}
       - name: Surface errors as annotations
         if: failure()
         run: |

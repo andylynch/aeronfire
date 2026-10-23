@@ -198,6 +198,17 @@ tasks.register<JavaExec>("runClient") {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform { excludeTags("failover") }
     jvmArgs(aeronJvmArgs)
+}
+
+// Slow: three real members in separate JVMs, leader killed mid-flow. Run with ./gradlew failoverTest.
+val failoverTest by tasks.registering(Test::class) {
+    description = "Kills the cluster leader mid-flow and checks no trade is lost or duplicated."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("failover") }
+    jvmArgs(aeronJvmArgs)
+    testLogging { showStandardStreams = true }
 }

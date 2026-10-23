@@ -192,7 +192,7 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Reference data: GLEIF, FIRDS and UK sanctions providers, screening, golden copy with audit.
 - [x] Post-trade: booking, clearing instructions, MiFIR reporting, APA, hospital, replay, record keeping.
 - [x] Post-trade page (http://localhost:8096) and `aeronfire:type=PostTrade` MBean (Jolokia :8779).
-- [ ] Failover test: in-process 3-member cluster, kill the leader mid-flow, assert no lost or duplicated trades.
+- [x] Failover test (`./gradlew failoverTest`, in CI): three member JVMs, leader SIGKILLed with an accept in flight, journal checked for lost, duplicated or gapped trades.
 - [ ] Gateway: reconnect to the new leader mid-flow, sweep stale RFQs, pool per-RFQ state.
 - [ ] Client reconnects and resends on leader change (idempotent RFQ ids).
 - [ ] Quote expiry via cluster timers instead of check-on-accept.
