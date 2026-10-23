@@ -111,6 +111,7 @@ val launchers = mapOf(
     "monitor" to "io.aeronfire.monitor.Monitor",
     "control" to "io.aeronfire.control.ControlPlane",
     "refdata" to "io.aeronfire.refdata.RefDataService",
+    "posttrade" to "io.aeronfire.posttrade.PostTradeService",
 )
 
 val extraStartScripts = launchers.map { (name, main) ->
@@ -177,6 +178,14 @@ tasks.register<JavaExec>("runRefData") {
     group = "application"
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.refdata.RefDataService"
+    jvmArgs(aeronJvmArgs)
+}
+
+tasks.register<JavaExec>("runPostTrade") {
+    description = "Runs post-trade: booking, clearing, MiFIR reporting, hospital (http://localhost:8096)."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.posttrade.PostTradeService"
     jvmArgs(aeronJvmArgs)
 }
 

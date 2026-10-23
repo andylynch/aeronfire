@@ -99,6 +99,24 @@ services:
       - "8095:8095"
     depends_on: [control]
 
+  posttrade:
+    image: aeronfire:local
+    hostname: posttrade
+    shm_size: 512m
+    entrypoint: ["/app/bin/posttrade"]
+    environment:
+      CLUSTER_HOSTS: node0,node1,node2
+      PORT_BASE: "9000"
+      EGRESS_HOST: posttrade
+      REFDATA_URL: http://refdata:8095
+      DATA_DIR: /data
+      POSTTRADE_HTTP_PORT: "8096"
+    volumes:
+      - posttrade-data:/data
+    ports:
+      - "8096:8096"
+    depends_on: [node0, node1, node2, refdata]
+
   tui:
     image: aeronfire:local
     profiles: [tui]
@@ -142,3 +160,6 @@ services:
       RFQ_COUNT: "20000"
       WARMUP_COUNT: "5000"
     depends_on: [node0, node1, node2]
+
+volumes:
+  posttrade-data:

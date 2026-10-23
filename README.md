@@ -70,6 +70,52 @@ Run locally (3 members, gateway and venue on one 2-core box):
 Latency numbers from that box aren't meaningful (six JVMs sharing two cores); use
 `scripts/bench-local.sh` on isolated cores for those.
 
+### Control plane and entitlements
+
+`control` (admin page :8090, MBeans under `aeronfire:type=*`, Jolokia :8778) is the only way to change
+credit, inventory, RTS 6 controls, entitlements or eligibility. It holds the control credential
+(`CONTROL_SECRET`) the cluster's authenticator checks; users log in with basic auth (demo password = user name,
+override with `CONTROL_USERS=name:pw,...`) and every command carries that user's id into the cluster.
+
+Entitlements are per user: permission bits (credit, inventory, position adjust, algo, kill switch,
+entitlements, approve, hospital, replay, refdata, view), client and instrument scope, and personal limits
+(max credit line, max position adjustment, max inventory limit). Anything over a limit, and every
+entitlement grant, kill-switch release or de-listing, becomes a pending change that a second user with
+`APPROVE` must approve; nobody approves their own. All of it is journalled with the acting user.
+
+### Reference data
+
+`refdata` (:8095) is the golden copy: in-house client/KYC master (simulated), plus open data. `REFDATA_MODE=live`
+reads GLEIF (LEIs), FCA FIRDS (instruments) and the UK Sanctions List; `snapshot` (default) uses checked-in
+extracts and also works offline. Each live source falls back to its snapshot on failure. Clients are
+name-screened against the sanctions list: a potential match blocks the client until compliance discounts it
+(an un-sanction is itself a four-eyes change in the cluster). Overrides need a reason and are audited.
+The snapshot simulates a list update 45 seconds after start (client 8 becomes a match) and has client 6 with
+overdue KYC, client 7 with a lapsed LEI, client 9 with no LEI and client 5 with no SSI. No real firm is
+flagged; the sanctioned names in the snapshot are real designations that no demo client is meant to be.
+
+### Post-trade
+
+`posttrade` (:8096) pulls the cluster's guaranteed event feed by sequence number, checkpoints, and for every
+trade: books it (settlement date, accrued interest, consideration), sends a DVP/RVP instruction to a clearer
+simulator, builds a UK MiFIR RTS 22 transaction report for an ARM simulator, and publishes off-venue
+trades through an APA simulator. Venue trades carry the venue's TVTIC (FIX `TrdMatchID`).
+
+Failures go to the **hospital** with reasons: missing LEI or SSI, checksum failures, instrument not admitted
+to the venue, ARM NACKs. Users with the `HOSPITAL` permission patch a report field (reason required) and
+resubmit; booking problems are fixed in reference data and resubmitted. `REPLAY` re-runs reporting for a
+sequence range (the ARM treats identical resends as duplicates) and processes trades it never saw.
+
+Record keeping (MiFIR Art. 25 / RTS 25 spirit): an append-only, SHA-256 hash-chained log of every capture,
+booking, report, ack/nack, repair, resubmit and replay with user and 5-year retention date. `/api/verify`
+detects tampering; state is rebuilt from the log on restart. This is tamper-evident, not WORM: copy to
+immutable storage in production.
+
+Regulatory simplifications: UK regime (the FCA's bond transparency rules replaced RTS 2 on 1 December 2025);
+the APA applies Category 1/2 and a single size threshold rather than the four size groups; no holiday
+calendar; no short-selling indicator (not applicable to corporate bonds). RTS 6 is covered by the kill
+switch, price collar and per-client throttle in the control plane.
+
 ## Design decisions
 
 | Decision | Why |
@@ -142,7 +188,10 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Pre-trade credit checks and client tiering.
 - [x] Artio FIX gateway and Tradeweb-style venue simulator.
 - [x] Web blotter and terminal UI: flow, positions, CS01, credit usage, cluster health.
-- [ ] Credit admin from the blotter (set limits and tiers, start-of-day reset).
+- [x] Credit and inventory admin, RTS 6 controls, entitlements with four-eyes (control plane, MBeans, Jolokia).
+- [x] Reference data: GLEIF, FIRDS and UK sanctions providers, screening, golden copy with audit.
+- [x] Post-trade: booking, clearing instructions, MiFIR reporting, APA, hospital, replay, record keeping.
+- [ ] Post-trade UI page and MBeans/Jolokia for the hospital.
 - [ ] Failover test: in-process 3-member cluster, kill the leader mid-flow, assert no lost or duplicated trades.
 - [ ] Gateway: reconnect to the new leader mid-flow, sweep stale RFQs, pool per-RFQ state.
 - [ ] Client reconnects and resends on leader change (idempotent RFQ ids).
