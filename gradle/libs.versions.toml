@@ -1,7 +1,7 @@
 [versions]
 # Aeron 1.48.4 ships with Agrona 2.2.4 and SBE 1.35.6. Keep the three in step.
-aeron = "1.48.4"
-sbe = "1.35.6"
+aeron = "1.53.3"
+sbe = "1.41.0"
 hdrhistogram = "2.2.2"
 junit = "5.12.2"
 
