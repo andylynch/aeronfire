@@ -5,7 +5,7 @@ sbe = "1.41.0"
 # Artio 0.186 is built against Aeron 1.53.3 / Agrona 2.6.1.
 artio = "0.186"
 hdrhistogram = "2.2.2"
-junit = "5.12.2"
+junit = "6.1.3"
 
 [libraries]
 aeron-client = { module = "io.aeron:aeron-client", version.ref = "aeron" }
