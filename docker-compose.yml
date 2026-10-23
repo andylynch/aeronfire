@@ -86,6 +86,19 @@ services:
       - "8778:8778"
     depends_on: [node0, node1, node2]
 
+  refdata:
+    image: aeronfire:local
+    hostname: refdata
+    entrypoint: ["/app/bin/refdata"]
+    environment:
+      # snapshot (default, offline) or live (GLEIF, UK Sanctions List, FCA FIRDS; falls back per source)
+      REFDATA_MODE: ${REFDATA_MODE:-snapshot}
+      CONTROL_URL: http://control:8090
+      REFDATA_HTTP_PORT: "8095"
+    ports:
+      - "8095:8095"
+    depends_on: [control]
+
   tui:
     image: aeronfire:local
     profiles: [tui]

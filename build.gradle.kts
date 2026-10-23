@@ -110,6 +110,7 @@ val launchers = mapOf(
     "venue-sim" to "io.aeronfire.venue.VenueSimulator",
     "monitor" to "io.aeronfire.monitor.Monitor",
     "control" to "io.aeronfire.control.ControlPlane",
+    "refdata" to "io.aeronfire.refdata.RefDataService",
 )
 
 val extraStartScripts = launchers.map { (name, main) ->
@@ -169,6 +170,14 @@ tasks.register<JavaExec>("runControl") {
     jvmArgumentProviders.add(CommandLineArgumentProvider {
         listOf("-javaagent:${jolokiaAgent.singleFile.absolutePath}=port=8778,host=localhost")
     })
+}
+
+tasks.register<JavaExec>("runRefData") {
+    description = "Runs the reference data service (REFDATA_MODE=snapshot|live, http://localhost:8095)."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.refdata.RefDataService"
+    jvmArgs(aeronJvmArgs)
 }
 
 tasks.register<JavaExec>("runClient") {

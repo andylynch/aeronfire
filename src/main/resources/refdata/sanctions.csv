@@ -1,0 +1,8 @@
+# UK Sanctions List (FCDO) snapshot: real designations, as published (sanctionslist.fcdo.gov.uk).
+# effectiveAfterSeconds > 0 simulates the entry arriving in a list update mid-session.
+# uniqueId|name|type|regime|dateDesignated|effectiveAfterSeconds
+AFG0001|HAJI KHAIRULLAH HAJI SATTAR MONEY EXCHANGE|Entity|The Afghanistan (Sanctions) (EU Exit) Regulations 2020|29/06/2012|0
+AFG0002|ROSHAN MONEY EXCHANGE|Entity|The Afghanistan (Sanctions) (EU Exit) Regulations 2020|29/06/2012|45
+AFG0003|HAQQANI NETWORK (HQN)|Entity|The Afghanistan (Sanctions) (EU Exit) Regulations 2020|05/11/2012|0
+AFG0004|RAHAT LTD.|Entity|The Afghanistan (Sanctions) (EU Exit) Regulations 2020|21/11/2012|0
+AFG0005|HAJI BASIR AND ZARJMIL COMPANY HAWALA|Entity|The Afghanistan (Sanctions) (EU Exit) Regulations 2020|27/03/2015|0
