@@ -17,6 +17,7 @@ repositories {
 }
 
 val sbeCodegen: Configuration by configurations.creating
+val fixCodegen: Configuration by configurations.creating
 
 dependencies {
     implementation(libs.aeron.client)
@@ -25,8 +26,12 @@ dependencies {
     implementation(libs.aeron.cluster)
     implementation(libs.aeron.samples)
     implementation(libs.hdrhistogram)
+    implementation(libs.artio.core)
+    implementation(libs.artio.codecs)
+    implementation(libs.artio.session.codecs)
 
     sbeCodegen(libs.sbe.tool)
+    fixCodegen(libs.artio.codecs)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -60,14 +65,30 @@ val generateCodecs by tasks.registering(JavaExec::class) {
     args(sbeSchema.asFile.absolutePath)
 }
 
+val fixDictionary = layout.projectDirectory.file("src/main/resources/fix/aeronfire-fix44.xml")
+val fixOutput = layout.buildDirectory.dir("generated/sources/fix")
+
+val generateFixCodecs by tasks.registering(JavaExec::class) {
+    description = "Generates Artio FIX codecs from the RFQ dictionary."
+    group = "build"
+    inputs.file(fixDictionary)
+    outputs.dir(fixOutput)
+    classpath = fixCodegen
+    mainClass = "uk.co.real_logic.artio.dictionary.CodecGenerationTool"
+    jvmArgs(aeronJvmArgs)
+    systemProperty("fix.codecs.parent_package", "io.aeronfire.fix")
+    args(fixOutput.get().asFile.absolutePath, fixDictionary.asFile.absolutePath)
+}
+
 sourceSets {
     main {
         java.srcDir(sbeOutput)
+        java.srcDir(fixOutput)
     }
 }
 
 tasks.compileJava {
-    dependsOn(generateCodecs)
+    dependsOn(generateCodecs, generateFixCodecs)
 }
 
 tasks.withType<JavaCompile>().configureEach {
@@ -80,21 +101,45 @@ application {
     applicationDefaultJvmArgs = aeronJvmArgs + listOf("-XX:+UseZGC", "-Dagrona.disable.bounds.checks=true")
 }
 
-// Second launcher in the distribution: bin/rfq-client alongside bin/aeronfire.
-val clientStartScripts by tasks.registering(CreateStartScripts::class) {
-    mainClass = "io.aeronfire.client.RfqClient"
-    applicationName = "rfq-client"
-    outputDir = layout.buildDirectory.dir("client-scripts").get().asFile
-    classpath = tasks.startScripts.get().classpath
-    defaultJvmOpts = aeronJvmArgs
+// Extra launchers in the distribution alongside bin/aeronfire (the cluster node).
+val launchers = mapOf(
+    "rfq-client" to "io.aeronfire.client.RfqClient",
+    "fix-gateway" to "io.aeronfire.gateway.FixGateway",
+    "venue-sim" to "io.aeronfire.venue.VenueSimulator",
+)
+
+val extraStartScripts = launchers.map { (name, main) ->
+    tasks.register<CreateStartScripts>("${name}StartScripts") {
+        mainClass = main
+        applicationName = name
+        outputDir = layout.buildDirectory.dir("scripts-$name").get().asFile
+        classpath = tasks.startScripts.get().classpath
+        defaultJvmOpts = aeronJvmArgs + listOf("-Djava.net.preferIPv4Stack=true")
+    }
 }
 
 distributions {
     main {
         contents {
-            from(clientStartScripts) { into("bin") }
+            extraStartScripts.forEach { from(it) { into("bin") } }
         }
     }
+}
+
+tasks.register<JavaExec>("runGateway") {
+    description = "Runs the FIX gateway against a local 3-node cluster."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.gateway.FixGateway"
+    jvmArgs(aeronJvmArgs)
+}
+
+tasks.register<JavaExec>("runVenue") {
+    description = "Runs the Tradeweb-style venue simulator against a local gateway."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.venue.VenueSimulator"
+    jvmArgs(aeronJvmArgs)
 }
 
 tasks.register<JavaExec>("runClient") {

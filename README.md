@@ -1,28 +1,56 @@
 # aeronfire
 
 A credit RFQ and pricing engine running as a replicated state machine on [Aeron Cluster](https://github.com/aeron-io/aeron).
-A small, honest model of the pieces a buy-side credit trading platform needs: firm quotes, execution,
-positions and spread risk, with failover that loses nothing.
+A small, honest model of the pieces a dealer needs on a credit RFQ venue: a FIX gateway, firm quotes,
+pre-trade credit and client tiering, execution, positions and spread risk, with failover that loses nothing.
 
-Java 25 · Aeron 1.48 · SBE · Agrona · HdrHistogram · Gradle 9
+Java 25 · Aeron 1.48 · Artio (FIX) · SBE · Agrona · HdrHistogram · Gradle 9
 
 ## What it does
 
 ```
-client ──RfqRequest──▶ ┌────────────── Aeron Cluster (3 members, Raft) ──────────────┐
-       ◀────Quote───── │  sequenced log ─▶ RfqClusteredService (identical on all 3)   │
-       ──QuoteAccept─▶ │     pricer · open quotes · positions · snapshot/replay       │
-       ◀────Trade───── └──────────────────────────────────────────────────────────────┘
+ venue sim ──FIX R──▶ ┌──────────┐ ─RfqRequest─▶ ┌──────── Aeron Cluster (3 members, Raft) ────────┐
+ (Tradeweb- ◀─FIX S── │   FIX    │ ◀───Quote──── │ sequenced log ─▶ RfqClusteredService (×3)        │
+  style)    ─FIX AJ─▶ │ gateway  │ ─QuoteAccept─▶ │  credit · tiers · pricer · quotes · positions    │
+            ◀─FIX 8── │ (Artio)  │ ◀─Trade/Reject │  snapshot/replay                                 │
+            ◀─FIX AG─ └──────────┘                └──────────────────────────────────────────────────┘
 ```
 
-1. A client sends an **RFQ** for one of five illustrative private-credit loans.
-2. The service prices it: base spread over a benchmark, half bid/offer, a size widening and an
-   **inventory skew** that leans towards flattening risk. Price is the PV per 100 at that yield.
-3. It returns a **firm quote** valid for 2s of cluster time.
-4. The client **accepts**; the service checks the quote is live, belongs to that session and RFQ,
-   books the **trade** and updates **positions**.
-5. **Snapshots** carry counters, positions and live quotes, so a restarted member rejoins from a
-   snapshot plus the log tail.
+1. The **venue simulator** plays a Tradeweb-style RFQ venue over FIX 4.4: clients (accounts 0–9, mixed
+   tiers) ask for prices on five illustrative private-credit loans, and several dealers compete.
+2. The **FIX gateway** (Artio acceptor) turns each QuoteRequest into a cluster RFQ.
+3. The **clustered service** checks **credit and tier**, then prices: base spread over a benchmark,
+   half bid/offer, size widening, **inventory skew** and a **tier adjustment**. Price is PV per 100.
+4. It returns a **firm quote** whose time-to-live depends on the client's tier.
+5. The venue invents competing dealers' prices and lifts or hits us only if we're best. On accept the
+   service re-checks the quote and credit, books the **trade**, updates **positions** and **utilisation**.
+6. Rejects go back as FIX QuoteRequestReject (tier, credit, instrument) or a rejected ExecutionReport.
+7. **Snapshots** carry counters, positions, live quotes and credit lines, so a restarted member
+   rejoins from a snapshot plus the log tail.
+
+### Credit and tiering
+
+| Tier | Spread adj. | Max ticket | Quote TTL | Demo clients | Demo limit |
+|---|---|---|---|---|---|
+| 1 | −5bp | 50mm | 3s | 0–1 | 500mm |
+| 2 | 0bp | 25mm | 2s | 2–5 | 200mm |
+| 3 | +10bp | 10mm | 1s | 6–9 | 50mm |
+
+Utilisation is gross traded notional. It's checked on the RFQ (don't quote what the client can't trade)
+and again on accept (other trades may have used the headroom since). `CreditUpdate` sets a line at
+runtime; `CreditReset` is the start-of-day reset. Credit lives in the cluster, so two gateways can never
+spend the same headroom.
+
+### Verified
+
+Run locally (3 members, gateway and venue on one 2-core box):
+
+- 1,000 FIX RFQs → 837 quotes, 163 rejects (124 above tier max, 39 credit), 120 trades, nothing lost.
+- 7,000 RFQ/trade round trips on the raw cluster client with no rejects (credit reset between phases).
+- Leader killed between runs: a new leader is elected and trading continues.
+
+Latency numbers from that box aren't meaningful (six JVMs sharing two cores); use
+`scripts/bench-local.sh` on isolated cores for those.
 
 ## Design decisions
 
@@ -35,17 +63,24 @@ client ──RfqRequest──▶ ┌────────────── A
 | Raw enum decoding on ingress | Decoding an unknown enum value throws; an exception in the service would stall the log. Validate the raw value instead. |
 | Snapshot as many small messages | Each record stays well under the snapshot publication's max message length, however many quotes are live. An end marker confirms a complete load. |
 | Quote ownership check | Only the session that received a quote can accept it, and only for the same RFQ. |
+| Rejects name what they reject | Each reject carries the rejected template id, so the gateway knows whether an id is an RFQ or a quote. |
+| Artio for FIX | Aeron-native FIX engine: the gateway's FIX journal and the cluster share one transport and tooling. |
+| Gateway owns id mapping | One cluster session carries every venue's flow; the gateway maps FIX QuoteReqID/QuoteID to cluster ids. |
 
 ## Run it
 
 ### Docker (any machine, including a Mac)
 
 ```bash
-docker compose up -d --build          # 3 members
-docker compose run --rm client        # RFQ round trips, prints latency percentiles
-docker compose kill node0             # kill a member, run the client again: a new leader serves it
+docker compose up -d --build          # 3 members + FIX gateway (FIX on localhost:9880)
+docker compose run --rm venue         # Tradeweb-style venue over FIX, prints flow stats every 5s
+docker compose run --rm client        # raw cluster load test, prints latency percentiles
+docker compose kill node0             # kill a member, run again: a new leader serves it
 docker compose down
 ```
+
+Any FIX 4.4 initiator can connect as `SenderCompID=TWSIM`, `TargetCompID=AERONFIRE`; the dictionary is
+`src/main/resources/fix/aeronfire-fix44.xml`.
 
 ### Bare metal (latency numbers)
 
@@ -85,7 +120,11 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 
 ## Roadmap
 
+- [x] Pre-trade credit checks and client tiering.
+- [x] Artio FIX gateway and Tradeweb-style venue simulator.
+- [ ] Web blotter and terminal UI: RFQs, quotes, trades, positions, CS01, credit usage, cluster health.
 - [ ] Failover test: in-process 3-member cluster, kill the leader mid-flow, assert no lost or duplicated trades.
+- [ ] Gateway: reconnect to the new leader mid-flow, sweep stale RFQs, pool per-RFQ state.
 - [ ] Client reconnects and resends on leader change (idempotent RFQ ids).
 - [ ] Quote expiry via cluster timers instead of check-on-accept.
 - [ ] Aeron Archive replay to rebuild valuations and CS01 as of a past log position.

@@ -161,7 +161,7 @@ public final class RfqClusteredService implements ClusteredService
                     .linesReset(credit.resetUtilisation(clientId));
                 offer(session, MessageHeaderEncoder.ENCODED_LENGTH + creditResetAckEncoder.encodedLength());
             }
-            default -> reject(session, -1, RejectReason.INVALID_REQUEST);
+            default -> reject(session, -1, RejectReason.INVALID_REQUEST, headerDecoder.templateId());
         }
     }
 
@@ -176,19 +176,19 @@ public final class RfqClusteredService implements ClusteredService
 
         if (!Instruments.isValid(instrumentId))
         {
-            reject(session, rfqId, RejectReason.UNKNOWN_INSTRUMENT);
+            reject(session, rfqId, RejectReason.UNKNOWN_INSTRUMENT, RfqRequestDecoder.TEMPLATE_ID);
             return;
         }
         if (notional <= 0 || (sideRaw != Side.BUY.value() && sideRaw != Side.SELL.value()))
         {
-            reject(session, rfqId, RejectReason.INVALID_REQUEST);
+            reject(session, rfqId, RejectReason.INVALID_REQUEST, RfqRequestDecoder.TEMPLATE_ID);
             return;
         }
 
         final CreditBook.Check check = credit.check(clientId, notional);
         if (check != CreditBook.Check.OK)
         {
-            reject(session, rfqId, toRejectReason(check));
+            reject(session, rfqId, toRejectReason(check), RfqRequestDecoder.TEMPLATE_ID);
             return;
         }
 
@@ -224,13 +224,13 @@ public final class RfqClusteredService implements ClusteredService
 
         if (slot < 0 || openQuotes.clusterSessionIdAt(slot) != session.id() || openQuotes.rfqIdAt(slot) != rfqId)
         {
-            reject(session, quoteId, RejectReason.UNKNOWN_QUOTE);
+            reject(session, quoteId, RejectReason.UNKNOWN_QUOTE, QuoteAcceptDecoder.TEMPLATE_ID);
             return;
         }
         if (timestamp > openQuotes.validUntilAt(slot))
         {
             openQuotes.remove(slot);
-            reject(session, quoteId, RejectReason.QUOTE_EXPIRED);
+            reject(session, quoteId, RejectReason.QUOTE_EXPIRED, QuoteAcceptDecoder.TEMPLATE_ID);
             return;
         }
 
@@ -242,7 +242,7 @@ public final class RfqClusteredService implements ClusteredService
         if (check != CreditBook.Check.OK)
         {
             openQuotes.remove(slot);
-            reject(session, quoteId, toRejectReason(check));
+            reject(session, quoteId, toRejectReason(check), QuoteAcceptDecoder.TEMPLATE_ID);
             return;
         }
 
@@ -275,7 +275,7 @@ public final class RfqClusteredService implements ClusteredService
 
         if (!CreditBook.isValidId(clientId) || null == tier || limit < 0)
         {
-            reject(session, clientId, RejectReason.INVALID_REQUEST);
+            reject(session, clientId, RejectReason.INVALID_REQUEST, CreditUpdateDecoder.TEMPLATE_ID);
             return;
         }
 
@@ -302,11 +302,13 @@ public final class RfqClusteredService implements ClusteredService
         };
     }
 
-    private void reject(final ClientSession session, final long correlationId, final RejectReason reason)
+    private void reject(
+        final ClientSession session, final long correlationId, final RejectReason reason, final int rejectedTemplateId)
     {
         rejectEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
             .correlationId(correlationId)
-            .reason(reason);
+            .reason(reason)
+            .rejectedTemplateId(rejectedTemplateId);
         offer(session, MessageHeaderEncoder.ENCODED_LENGTH + rejectEncoder.encodedLength());
     }
 

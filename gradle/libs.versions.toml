@@ -12,6 +12,9 @@ aeron-archive = { module = "io.aeron:aeron-archive", version.ref = "aeron" }
 aeron-cluster = { module = "io.aeron:aeron-cluster", version.ref = "aeron" }
 aeron-samples = { module = "io.aeron:aeron-samples", version.ref = "aeron" }
 sbe-tool = { module = "uk.co.real-logic:sbe-tool", version.ref = "sbe" }
+artio-codecs = { module = "uk.co.real-logic:artio-codecs", version.ref = "artio" }
+artio-core = { module = "uk.co.real-logic:artio-core", version.ref = "artio" }
+artio-session-codecs = { module = "uk.co.real-logic:artio-session-codecs", version.ref = "artio" }
 hdrhistogram = { module = "org.hdrhistogram:HdrHistogram", version.ref = "hdrhistogram" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

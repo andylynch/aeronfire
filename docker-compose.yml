@@ -1,7 +1,8 @@
-# Three cluster members on one host, plus an on-demand load client.
-#   docker compose up -d --build
-#   docker compose run --rm client
-#   docker compose kill node0          # watch a new leader take over
+# Three cluster members, the FIX gateway, and on-demand venue and load clients.
+#   docker compose up -d --build             # cluster + gateway
+#   docker compose run --rm venue            # Tradeweb-style venue over FIX
+#   docker compose run --rm client           # raw cluster load test (no FIX)
+#   docker compose kill <leader>             # watch a new leader take over
 x-node: &node
   build: .
   image: aeronfire:local
@@ -32,6 +33,35 @@ services:
     environment:
       <<: *node-env
       NODE_ID: "2"
+
+  gateway:
+    image: aeronfire:local
+    hostname: gateway
+    shm_size: 1g
+    entrypoint: ["/app/bin/fix-gateway"]
+    environment:
+      CLUSTER_HOSTS: node0,node1,node2
+      PORT_BASE: "9000"
+      EGRESS_HOST: gateway
+      FIX_PORT: "9880"
+      WORK_DIR: /tmp
+    ports:
+      - "9880:9880"
+    depends_on: [node0, node1, node2]
+
+  venue:
+    image: aeronfire:local
+    profiles: [venue]
+    hostname: venue
+    shm_size: 512m
+    entrypoint: ["/app/bin/venue-sim"]
+    environment:
+      GATEWAY_HOST: gateway
+      FIX_PORT: "9880"
+      RFQ_RATE: "50"
+      DURATION_SECONDS: "60"
+      WORK_DIR: /tmp
+    depends_on: [gateway]
 
   client:
     image: aeronfire:local

@@ -99,8 +99,9 @@
     </sbe:message>
 
     <sbe:message name="Reject" id="12" description="Request rejected">
-        <field name="correlationId" id="1" type="int64"/>
+        <field name="correlationId" id="1" type="int64" description="rfqId, quoteId or clientId, per rejectedTemplateId"/>
         <field name="reason" id="2" type="RejectReason"/>
+        <field name="rejectedTemplateId" id="3" type="uint16" description="Template id of the rejected request"/>
     </sbe:message>
 
     <sbe:message name="CreditStatus" id="13" description="A client's credit line after an update">
