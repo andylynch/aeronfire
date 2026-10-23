@@ -72,6 +72,10 @@
         <field name="clientId" id="1" type="int32" description="-1 resets every client"/>
     </sbe:message>
 
+    <sbe:message name="Subscribe" id="5" description="Monitor: receive a copy of all flow, starting with a state dump">
+        <field name="sendStateDump" id="1" type="BooleanType"/>
+    </sbe:message>
+
     <!-- Egress: cluster to client or gateway -->
     <sbe:message name="Quote" id="10" description="Firm quote, valid until a cluster timestamp">
         <field name="rfqId" id="1" type="int64"/>
@@ -116,6 +120,16 @@
         <field name="linesReset" id="2" type="int32"/>
     </sbe:message>
 
+    <sbe:message name="PositionStatus" id="15" description="Net position, sent in a monitor state dump">
+        <field name="instrumentId" id="1" type="int32"/>
+        <field name="netNotional" id="2" type="Notional"/>
+    </sbe:message>
+
+    <sbe:message name="StateDumpEnd" id="16" description="Marks the end of a monitor state dump">
+        <field name="nextQuoteId" id="1" type="int64"/>
+        <field name="nextTradeId" id="2" type="int64"/>
+    </sbe:message>
+
     <!--
         Snapshot: written by the clustered service, read back on restart.
         One small message per record keeps each well under the snapshot publication's max message length,
@@ -147,6 +161,10 @@
         <field name="tier" id="2" type="Tier"/>
         <field name="creditLimit" id="3" type="Notional"/>
         <field name="utilised" id="4" type="Notional"/>
+    </sbe:message>
+
+    <sbe:message name="SubscriberSnapshot" id="24" description="One monitor subscription">
+        <field name="clusterSessionId" id="1" type="int64"/>
     </sbe:message>
 
     <sbe:message name="SnapshotEnd" id="22" description="Marks a complete snapshot">

@@ -106,6 +106,7 @@ val launchers = mapOf(
     "rfq-client" to "io.aeronfire.client.RfqClient",
     "fix-gateway" to "io.aeronfire.gateway.FixGateway",
     "venue-sim" to "io.aeronfire.venue.VenueSimulator",
+    "monitor" to "io.aeronfire.monitor.Monitor",
 )
 
 val extraStartScripts = launchers.map { (name, main) ->
@@ -140,6 +141,15 @@ tasks.register<JavaExec>("runVenue") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.venue.VenueSimulator"
     jvmArgs(aeronJvmArgs)
+}
+
+tasks.register<JavaExec>("runMonitor") {
+    description = "Runs the blotter (UI=web|tui|both, web on http://localhost:8080)."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.monitor.Monitor"
+    jvmArgs(aeronJvmArgs)
+    standardInput = System.`in`
 }
 
 tasks.register<JavaExec>("runClient") {

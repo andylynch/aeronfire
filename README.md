@@ -28,6 +28,23 @@ Java 25 · Aeron 1.53 · Artio (FIX) · SBE · Agrona · HdrHistogram · Gradle 
 7. **Snapshots** carry counters, positions, live quotes and credit lines, so a restarted member
    rejoins from a snapshot plus the log tail.
 
+### Blotter: web and terminal
+
+![web blotter](docs/blotter.png)
+
+A monitor process subscribes to the cluster's **drop copy**: every quote, trade, reject and credit change
+is copied to subscribed sessions with one non-blocking offer each, so a slow UI can never stall the log.
+On subscribe the service sends a **state dump** (positions, credit lines), so a monitor that joins late
+or misses copies resyncs. The monitor's cluster session survives failover: the header shows the new
+leader and term, and the counts carry on.
+
+- **Web:** JDK `HttpServer` plus Server-Sent Events, one static page, no framework. Virtual threads
+  serve one blocking writer per browser tab.
+- **Terminal:** ANSI redraw, no dependencies, works over ssh.
+
+Shows flow (quotes, trades, hit ratio, rejects by reason), positions with mark and CS01 (P&L if spreads
+widen 1bp), per-client credit utilisation, the live blotter, and cluster leader, term and failovers.
+
 ### Credit and tiering
 
 | Tier | Spread adj. | Max ticket | Quote TTL | Demo clients | Demo limit |
@@ -48,6 +65,7 @@ Run locally (3 members, gateway and venue on one 2-core box):
 - 1,000 FIX RFQs → 837 quotes, 163 rejects (124 above tier max, 39 credit), 120 trades, nothing lost.
 - 7,000 RFQ/trade round trips on the raw cluster client with no rejects (credit reset between phases).
 - Leader killed between runs: a new leader is elected and trading continues.
+- Blotter through a leader kill: stays connected, shows leader 0 → 1 in term 1, keeps counting.
 
 Latency numbers from that box aren't meaningful (six JVMs sharing two cores); use
 `scripts/bench-local.sh` on isolated cores for those.
@@ -72,8 +90,9 @@ Latency numbers from that box aren't meaningful (six JVMs sharing two cores); us
 ### Docker (any machine, including a Mac)
 
 ```bash
-docker compose up -d --build          # 3 members + FIX gateway (FIX on localhost:9880)
+docker compose up -d --build          # 3 members, FIX gateway (:9880), web blotter (http://localhost:8080)
 docker compose run --rm venue         # Tradeweb-style venue over FIX, prints flow stats every 5s
+docker compose run --rm tui           # terminal blotter
 docker compose run --rm client        # raw cluster load test, prints latency percentiles
 docker compose kill node0             # kill a member, run again: a new leader serves it
 docker compose down
@@ -122,7 +141,8 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 
 - [x] Pre-trade credit checks and client tiering.
 - [x] Artio FIX gateway and Tradeweb-style venue simulator.
-- [ ] Web blotter and terminal UI: RFQs, quotes, trades, positions, CS01, credit usage, cluster health.
+- [x] Web blotter and terminal UI: flow, positions, CS01, credit usage, cluster health.
+- [ ] Credit admin from the blotter (set limits and tiers, start-of-day reset).
 - [ ] Failover test: in-process 3-member cluster, kill the leader mid-flow, assert no lost or duplicated trades.
 - [ ] Gateway: reconnect to the new leader mid-flow, sweep stale RFQs, pool per-RFQ state.
 - [ ] Client reconnects and resends on leader change (idempotent RFQ ids).

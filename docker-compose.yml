@@ -1,6 +1,7 @@
 # Three cluster members, the FIX gateway, and on-demand venue and load clients.
-#   docker compose up -d --build             # cluster + gateway
+#   docker compose up -d --build             # cluster + gateway + web blotter (http://localhost:8080)
 #   docker compose run --rm venue            # Tradeweb-style venue over FIX
+#   docker compose run --rm tui              # terminal blotter
 #   docker compose run --rm client           # raw cluster load test (no FIX)
 #   docker compose kill <leader>             # watch a new leader take over
 x-node: &node
@@ -47,6 +48,36 @@ services:
       WORK_DIR: /tmp
     ports:
       - "9880:9880"
+    depends_on: [node0, node1, node2]
+
+  monitor:
+    image: aeronfire:local
+    hostname: monitor
+    shm_size: 512m
+    entrypoint: ["/app/bin/monitor"]
+    environment:
+      CLUSTER_HOSTS: node0,node1,node2
+      PORT_BASE: "9000"
+      EGRESS_HOST: monitor
+      UI: web
+      HTTP_PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on: [node0, node1, node2]
+
+  tui:
+    image: aeronfire:local
+    profiles: [tui]
+    hostname: tui
+    shm_size: 512m
+    tty: true
+    stdin_open: true
+    entrypoint: ["/app/bin/monitor"]
+    environment:
+      CLUSTER_HOSTS: node0,node1,node2
+      PORT_BASE: "9000"
+      EGRESS_HOST: tui
+      UI: tui
     depends_on: [node0, node1, node2]
 
   venue:

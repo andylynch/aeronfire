@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aeronfire blotter</title>
+<style>
+  :root {
+    --bg: #0b0e13; --panel: #121721; --line: #1f2633; --text: #d7dde8; --muted: #7d8799;
+    --buy: #3ecf8e; --sell: #ff6b6b; --warn: #f2b84b; --accent: #6ea8ff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: .04em; }
+  header .sub { color: var(--muted); }
+  .health { margin-left: auto; display: flex; gap: 14px; align-items: center; font-family: var(--mono); font-size: 12px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; background: var(--muted); }
+  .dot.ok { background: var(--buy); box-shadow: 0 0 8px var(--buy); }
+  .dot.bad { background: var(--sell); }
+  main { display: grid; gap: 14px; padding: 16px 20px; grid-template-columns: repeat(12, 1fr); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+  section h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; }
+  .kpis { grid-column: span 12; display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; background: none; border: 0; padding: 0; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  .kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .kpi .value { font-family: var(--mono); font-size: 22px; margin-top: 2px; }
+  .kpi .rate { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+  .positions { grid-column: span 7; }
+  .credit { grid-column: span 5; }
+  .blotter { grid-column: span 12; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 4px 6px; border-bottom: 1px solid #161c27; white-space: nowrap; }
+  td.num, th.num { text-align: right; }
+  .buy { color: var(--buy); } .sell { color: var(--sell); } .muted { color: var(--muted); } .warn { color: var(--warn); }
+  tr.total td { border-top: 1px solid var(--line); font-weight: 600; }
+  .bar { position: relative; height: 8px; background: #1b2230; border-radius: 4px; overflow: hidden; min-width: 90px; }
+  .bar > span { position: absolute; inset: 0 auto 0 0; background: var(--buy); border-radius: 4px; transition: width .3s; }
+  .bar.mid > span { background: var(--warn); } .bar.high > span { background: var(--sell); }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); }
+  .t-QUOTE { color: var(--accent); } .t-TRADE { color: var(--buy); } .t-REJECT { color: var(--sell); }
+  .reasons { margin-top: 8px; color: var(--warn); font-family: var(--mono); font-size: 12px; min-height: 1em; }
+  .scroll { overflow-x: auto; }
+  @media (max-width: 900px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .positions, .credit { grid-column: span 12; }
+    main { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>aeronfire</h1>
+  <span class="sub">credit RFQ engine · Aeron Cluster</span>
+  <div class="health">
+    <span><span id="dot" class="dot"></span><span id="leader">connecting…</span></span>
+    <span class="muted" id="term"></span>
+    <span class="muted" id="changes"></span>
+  </div>
+</header>
+<main>
+  <section class="kpis">
+    <div class="kpi"><div class="label">Quotes</div><div class="value" id="quotes">0</div><div class="rate" id="qps"></div></div>
+    <div class="kpi"><div class="label">Trades</div><div class="value" id="trades">0</div><div class="rate" id="tps"></div></div>
+    <div class="kpi"><div class="label">Hit ratio</div><div class="value" id="hit">–</div><div class="rate">trades / quotes</div></div>
+    <div class="kpi"><div class="label">Traded</div><div class="value" id="traded">0</div><div class="rate">gross notional</div></div>
+    <div class="kpi"><div class="label">Rejects</div><div class="value" id="rejects">0</div><div class="rate">credit · tier · other</div></div>
+    <div class="kpi"><div class="label">Book CS01</div><div class="value" id="cs01">0</div><div class="rate">P&amp;L if spreads widen 1bp</div></div>
+  </section>
+
+  <section class="positions">
+    <h2>Positions &amp; risk</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Loan</th><th class="num">Net</th><th class="num">Mark</th><th class="num" title="P&amp;L if spreads widen 1bp">CS01</th></tr></thead>
+      <tbody id="positions"></tbody>
+    </table></div>
+    <div class="reasons" id="reasons"></div>
+  </section>
+
+  <section class="credit">
+    <h2>Client credit</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Client</th><th>Tier</th><th class="num">Limit</th><th class="num">Used</th><th>Utilisation</th><th class="num">Trades</th></tr></thead>
+      <tbody id="credit"></tbody>
+    </table></div>
+  </section>
+
+  <section class="blotter">
+    <h2>Blotter</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Time</th><th>Event</th><th>Client</th><th>Side</th><th class="num">Size</th><th>Loan</th><th class="num">Price</th><th class="num">Spread</th><th>Detail</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table></div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const mm = (n) => (n / 1e6).toFixed(1) + 'mm';
+  const money = (n) => Math.round(n).toLocaleString('en-GB');
+  const signed = (n, text) => `<span class="${n > 0 ? 'buy' : n < 0 ? 'sell' : 'muted'}">${text}</span>`;
+
+  function render(s) {
+    const c = s.cluster;
+    const healthy = c.leader >= 0 && c.synced;
+    $('dot').className = 'dot ' + (healthy ? 'ok' : 'bad');
+    $('leader').textContent = c.leader >= 0 ? `leader ${c.leader}` : 'no leader';
+    $('term').textContent = c.term >= 0 ? `term ${c.term}` : '';
+    $('changes').textContent = `failovers ${c.leaderChanges}${c.synced ? '' : ' · syncing'}`;
+
+    const f = s.flow;
+    $('quotes').textContent = f.quotes.toLocaleString('en-GB');
+    $('qps').textContent = `${f.quotesPerSec}/s`;
+    $('trades').textContent = f.trades.toLocaleString('en-GB');
+    $('tps').textContent = `${f.tradesPerSec}/s`;
+    $('hit').textContent = f.quotes ? (100 * f.hitRatio).toFixed(1) + '%' : '–';
+    $('traded').textContent = mm(f.tradedNotional);
+    $('rejects').textContent = f.rejects.toLocaleString('en-GB');
+    $('cs01').innerHTML = signed(s.totalCs01, money(s.totalCs01));
+    $('reasons').textContent = Object.entries(f.rejectsByReason).map(([k, v]) => `${k} ${v}`).join('   ');
+
+    $('positions').innerHTML = s.positions.map(p =>
+      `<tr><td>${p.name}</td><td class="num">${signed(p.net, mm(p.net))}</td>` +
+      `<td class="num">${money(p.mark)}</td><td class="num">${signed(p.cs01, money(p.cs01))}</td></tr>`).join('') +
+      `<tr class="total"><td>Total</td><td></td><td></td><td class="num">${signed(s.totalCs01, money(s.totalCs01))}</td></tr>`;
+
+    $('credit').innerHTML = s.credit.map(cl => {
+      const u = cl.limit ? cl.utilised / cl.limit : 0;
+      const level = u > 0.9 ? 'high' : u > 0.6 ? 'mid' : '';
+      return `<tr><td>${cl.client}</td><td><span class="tag">T${cl.tier}</span></td>` +
+        `<td class="num">${mm(cl.limit)}</td><td class="num">${mm(cl.utilised)}</td>` +
+        `<td><div class="bar ${level}"><span style="width:${Math.min(100, 100 * u).toFixed(1)}%"></span></div></td>` +
+        `<td class="num">${cl.trades}</td></tr>`;
+    }).join('');
+
+    $('recent').innerHTML = s.recent.map(e => e.type === 'REJECT'
+      ? `<tr><td class="muted">${e.time}</td><td class="t-REJECT">REJECT</td><td colspan="6"></td><td class="warn">${e.detail}</td></tr>`
+      : `<tr><td class="muted">${e.time}</td><td class="t-${e.type}">${e.type}</td><td>${e.client}</td>` +
+        `<td class="${e.side === 'BUY' ? 'buy' : 'sell'}">${e.side}</td><td class="num">${mm(e.notional)}</td>` +
+        `<td>${e.instrument}</td><td class="num">${e.price.toFixed(4)}</td>` +
+        `<td class="num">${e.type === 'QUOTE' ? e.spreadBps + 'bp' : ''}</td><td></td></tr>`).join('');
+  }
+
+  function connect() {
+    const source = new EventSource('/events');
+    source.onmessage = (msg) => { try { render(JSON.parse(msg.data)); } catch (e) { /* partial frame */ } };
+    source.onerror = () => {
+      $('dot').className = 'dot bad';
+      $('leader').textContent = 'monitor offline';
+      source.close();
+      setTimeout(connect, 2000);
+    };
+  }
+  connect();
+</script>
+</body>
+</html>

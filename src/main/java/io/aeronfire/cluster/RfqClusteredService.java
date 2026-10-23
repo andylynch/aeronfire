@@ -27,6 +27,7 @@ import io.aeronfire.sbe.MessageHeaderDecoder;
 import io.aeronfire.sbe.MessageHeaderEncoder;
 import io.aeronfire.sbe.OpenQuoteSnapshotDecoder;
 import io.aeronfire.sbe.OpenQuoteSnapshotEncoder;
+import io.aeronfire.sbe.PositionStatusEncoder;
 import io.aeronfire.sbe.QuoteAcceptDecoder;
 import io.aeronfire.sbe.QuoteEncoder;
 import io.aeronfire.sbe.RejectEncoder;
@@ -35,6 +36,10 @@ import io.aeronfire.sbe.RfqRequestDecoder;
 import io.aeronfire.sbe.Side;
 import io.aeronfire.sbe.SnapshotEndDecoder;
 import io.aeronfire.sbe.SnapshotEndEncoder;
+import io.aeronfire.sbe.StateDumpEndEncoder;
+import io.aeronfire.sbe.SubscribeDecoder;
+import io.aeronfire.sbe.SubscriberSnapshotDecoder;
+import io.aeronfire.sbe.SubscriberSnapshotEncoder;
 import io.aeronfire.sbe.TradeEncoder;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -52,10 +57,14 @@ import java.nio.ByteBuffer;
  * <p>
  * Pre-trade credit runs here too, so limits are enforced against the same sequenced view of trades on
  * every member: no race between two gateways spending the same headroom.
+ * <p>
+ * Monitors (the blotter UIs) subscribe for a drop copy of all flow. The copy is best effort: one offer
+ * attempt per subscriber, never blocking the log, and a subscriber can always resync from a state dump.
  */
 public final class RfqClusteredService implements ClusteredService
 {
     private static final int OPEN_QUOTE_CAPACITY = 4096;
+    private static final int MAX_SUBSCRIBERS = 16;
 
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
     private final MessageHeaderEncoder headerEncoder = new MessageHeaderEncoder();
@@ -76,6 +85,14 @@ public final class RfqClusteredService implements ClusteredService
     private final ClientCreditSnapshotDecoder creditSnapshotDecoder = new ClientCreditSnapshotDecoder();
     private final SnapshotEndEncoder snapshotEndEncoder = new SnapshotEndEncoder();
     private final SnapshotEndDecoder snapshotEndDecoder = new SnapshotEndDecoder();
+    private final SubscribeDecoder subscribeDecoder = new SubscribeDecoder();
+    private final PositionStatusEncoder positionStatusEncoder = new PositionStatusEncoder();
+    private final StateDumpEndEncoder stateDumpEndEncoder = new StateDumpEndEncoder();
+    private final SubscriberSnapshotEncoder subscriberSnapshotEncoder = new SubscriberSnapshotEncoder();
+    private final SubscriberSnapshotDecoder subscriberSnapshotDecoder = new SubscriberSnapshotDecoder();
+    private final long[] subscribers = new long[MAX_SUBSCRIBERS];
+    private int subscriberCount;
+    private long droppedCopies;
     private final MutableDirectBuffer egressBuffer = new UnsafeBuffer(ByteBuffer.allocateDirect(256));
 
     private final Pricer pricer;
@@ -119,6 +136,7 @@ public final class RfqClusteredService implements ClusteredService
     @Override
     public void onSessionClose(final ClientSession session, final long timestamp, final CloseReason closeReason)
     {
+        removeSubscriber(session.id());
     }
 
     @Override
@@ -151,6 +169,11 @@ public final class RfqClusteredService implements ClusteredService
             {
                 creditUpdateDecoder.wrap(buffer, bodyOffset, blockLength, version);
                 onCreditUpdate(session);
+            }
+            case SubscribeDecoder.TEMPLATE_ID ->
+            {
+                subscribeDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                onSubscribe(session, subscribeDecoder.sendStateDumpRaw() == BooleanType.TRUE.value());
             }
             case CreditResetDecoder.TEMPLATE_ID ->
             {
@@ -213,7 +236,7 @@ public final class RfqClusteredService implements ClusteredService
             .price(priceE6)
             .spreadBps(spreadBps)
             .validUntil(validUntil);
-        offer(session, MessageHeaderEncoder.ENCODED_LENGTH + quoteEncoder.encodedLength());
+        offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + quoteEncoder.encodedLength());
     }
 
     private void onAccept(final ClientSession session, final long timestamp)
@@ -264,7 +287,7 @@ public final class RfqClusteredService implements ClusteredService
             .price(priceE6)
             .executedAt(timestamp)
             .clientUtilised(credit.utilised(clientId));
-        offer(session, MessageHeaderEncoder.ENCODED_LENGTH + tradeEncoder.encodedLength());
+        offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + tradeEncoder.encodedLength());
     }
 
     private void onCreditUpdate(final ClientSession session)
@@ -288,7 +311,7 @@ public final class RfqClusteredService implements ClusteredService
             .tier(io.aeronfire.sbe.Tier.get((short)tier.ordinal()))
             .creditLimit(limit)
             .utilised(utilised);
-        offer(session, MessageHeaderEncoder.ENCODED_LENGTH + creditStatusEncoder.encodedLength());
+        offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + creditStatusEncoder.encodedLength());
     }
 
     private static RejectReason toRejectReason(final CreditBook.Check check)
@@ -309,7 +332,94 @@ public final class RfqClusteredService implements ClusteredService
             .correlationId(correlationId)
             .reason(reason)
             .rejectedTemplateId(rejectedTemplateId);
-        offer(session, MessageHeaderEncoder.ENCODED_LENGTH + rejectEncoder.encodedLength());
+        offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + rejectEncoder.encodedLength());
+    }
+
+    private void onSubscribe(final ClientSession session, final boolean sendStateDump)
+    {
+        if (!isSubscriber(session.id()))
+        {
+            if (subscriberCount == MAX_SUBSCRIBERS)
+            {
+                reject(session, session.id(), RejectReason.INVALID_REQUEST, SubscribeDecoder.TEMPLATE_ID);
+                return;
+            }
+            subscribers[subscriberCount++] = session.id();
+        }
+
+        if (!sendStateDump)
+        {
+            return;
+        }
+
+        for (int instrumentId = 0; instrumentId < Instruments.COUNT; instrumentId++)
+        {
+            positionStatusEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+                .instrumentId(instrumentId)
+                .netNotional(positions.net(instrumentId));
+            offer(session, MessageHeaderEncoder.ENCODED_LENGTH + positionStatusEncoder.encodedLength());
+        }
+        for (int clientId = 0; clientId < CreditBook.CAPACITY; clientId++)
+        {
+            if (credit.isKnown(clientId))
+            {
+                creditStatusEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+                    .clientId(clientId)
+                    .tier(io.aeronfire.sbe.Tier.get((short)credit.tier(clientId).ordinal()))
+                    .creditLimit(credit.limit(clientId))
+                    .utilised(credit.utilised(clientId));
+                offer(session, MessageHeaderEncoder.ENCODED_LENGTH + creditStatusEncoder.encodedLength());
+            }
+        }
+        stateDumpEndEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+            .nextQuoteId(nextQuoteId)
+            .nextTradeId(nextTradeId);
+        offer(session, MessageHeaderEncoder.ENCODED_LENGTH + stateDumpEndEncoder.encodedLength());
+    }
+
+    private boolean isSubscriber(final long clusterSessionId)
+    {
+        for (int i = 0; i < subscriberCount; i++)
+        {
+            if (subscribers[i] == clusterSessionId)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void removeSubscriber(final long clusterSessionId)
+    {
+        for (int i = 0; i < subscriberCount; i++)
+        {
+            if (subscribers[i] == clusterSessionId)
+            {
+                subscribers[i] = subscribers[--subscriberCount];
+                return;
+            }
+        }
+    }
+
+    /**
+     * Reply to the requester (blocking until sent), then drop-copy to monitors (one attempt each).
+     */
+    private void offerAndCopy(final ClientSession session, final int length)
+    {
+        offer(session, length);
+        for (int i = 0; i < subscriberCount; i++)
+        {
+            final long subscriberId = subscribers[i];
+            if (subscriberId == session.id())
+            {
+                continue;
+            }
+            final ClientSession subscriber = cluster.getClientSession(subscriberId);
+            if (null != subscriber && subscriber.offer(egressBuffer, 0, length) < 0)
+            {
+                droppedCopies++; // diagnostic only; never feeds back into state
+            }
+        }
     }
 
     private void offer(final ClientSession session, final int length)
@@ -385,6 +495,13 @@ public final class RfqClusteredService implements ClusteredService
                 .utilised(credit.utilised(clientId));
             offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + creditSnapshotEncoder.encodedLength());
             clientsWritten++;
+        }
+
+        for (int i = 0; i < subscriberCount; i++)
+        {
+            subscriberSnapshotEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder).clusterSessionId(subscribers[i]);
+            offerSnapshot(
+                snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + subscriberSnapshotEncoder.encodedLength());
         }
 
         snapshotEndEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
@@ -466,6 +583,14 @@ public final class RfqClusteredService implements ClusteredService
                     creditSnapshotDecoder.creditLimit(),
                     creditSnapshotDecoder.utilised());
             }
+            case SubscriberSnapshotDecoder.TEMPLATE_ID ->
+            {
+                subscriberSnapshotDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                if (subscriberCount < MAX_SUBSCRIBERS)
+                {
+                    subscribers[subscriberCount++] = subscriberSnapshotDecoder.clusterSessionId();
+                }
+            }
             case SnapshotEndDecoder.TEMPLATE_ID ->
             {
                 snapshotEndDecoder.wrap(buffer, bodyOffset, blockLength, version);
@@ -483,5 +608,9 @@ public final class RfqClusteredService implements ClusteredService
     @Override
     public void onTerminate(final Cluster cluster)
     {
+        if (droppedCopies > 0)
+        {
+            System.out.printf("monitor drop copies dropped under back pressure: %d%n", droppedCopies);
+        }
     }
 }
