@@ -6,6 +6,8 @@ import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
 import io.aeron.logbuffer.Header;
 import io.aeron.samples.cluster.ClusterConfig;
+import io.aeronfire.sbe.CreditResetAckDecoder;
+import io.aeronfire.sbe.CreditResetEncoder;
 import io.aeronfire.sbe.MessageHeaderDecoder;
 import io.aeronfire.sbe.MessageHeaderEncoder;
 import io.aeronfire.sbe.QuoteAcceptEncoder;
@@ -38,6 +40,7 @@ public final class RfqClient implements EgressListener
     private static final int GOT_QUOTE = 1;
     private static final int GOT_TRADE = 2;
     private static final int GOT_REJECT = 3;
+    private static final int GOT_RESET_ACK = 4;
     private static final int CLIENTS = 10; // demo clients 0..9, seeded in the cluster across all tiers
 
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
@@ -47,6 +50,7 @@ public final class RfqClient implements EgressListener
     private final RejectDecoder rejectDecoder = new RejectDecoder();
     private final RfqRequestEncoder rfqEncoder = new RfqRequestEncoder();
     private final QuoteAcceptEncoder acceptEncoder = new QuoteAcceptEncoder();
+    private final CreditResetEncoder resetEncoder = new CreditResetEncoder();
     private final UnsafeBuffer sendBuffer = new UnsafeBuffer(ByteBuffer.allocateDirect(128));
     private final IdleStrategy idleStrategy = new BusySpinIdleStrategy();
 
@@ -93,6 +97,7 @@ public final class RfqClient implements EgressListener
                 }
                 response = GOT_REJECT;
             }
+            case CreditResetAckDecoder.TEMPLATE_ID -> response = GOT_RESET_ACK;
             default ->
             {
             }
@@ -106,6 +111,7 @@ public final class RfqClient implements EgressListener
         final String egressHost = env("EGRESS_HOST", "localhost");
         final int count = Integer.parseInt(env("RFQ_COUNT", "20000"));
         final int warmup = Integer.parseInt(env("WARMUP_COUNT", "5000"));
+        final int resetEvery = Integer.parseInt(env("CREDIT_RESET_EVERY", "250"));
 
         final RfqClient client = new RfqClient();
         final String ingressEndpoints =
@@ -123,11 +129,11 @@ public final class RfqClient implements EgressListener
                 .aeronDirectoryName(driver.aeronDirectoryName())))
         {
             System.out.printf("connected, leader member %d%n", cluster.leaderMemberId());
-            client.run(cluster, warmup, null, null);
+            client.run(cluster, warmup, resetEvery, null, null);
 
             final Histogram rfqToQuote = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
             final Histogram acceptToTrade = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
-            client.run(cluster, count, rfqToQuote, acceptToTrade);
+            client.run(cluster, count, resetEvery, rfqToQuote, acceptToTrade);
 
             print("RFQ -> quote", rfqToQuote);
             print("accept -> trade", acceptToTrade);
@@ -143,10 +149,22 @@ public final class RfqClient implements EgressListener
     }
 
     private void run(
-        final AeronCluster cluster, final int count, final Histogram rfqToQuote, final Histogram acceptToTrade)
+        final AeronCluster cluster,
+        final int count,
+        final int resetEvery,
+        final Histogram rfqToQuote,
+        final Histogram acceptToTrade)
     {
         for (int i = 0; i < count; i++)
         {
+            if (resetEvery > 0 && i % resetEvery == 0)
+            {
+                // Untimed: a start-of-day style reset so a long load run doesn't just measure credit rejects.
+                resetEncoder.wrapAndApplyHeader(sendBuffer, 0, headerEncoder).clientId(-1);
+                send(cluster, MessageHeaderEncoder.ENCODED_LENGTH + resetEncoder.encodedLength());
+                await(cluster);
+            }
+
             final long rfqId = i;
             rfqEncoder.wrapAndApplyHeader(sendBuffer, 0, headerEncoder)
                 .rfqId(rfqId)

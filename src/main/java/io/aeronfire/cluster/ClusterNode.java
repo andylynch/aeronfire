@@ -24,6 +24,7 @@ public final class ClusterNode
     {
     }
 
+    @SuppressWarnings("try")
     public static void main(final String[] args)
     {
         final int nodeId = Integer.parseInt(env("NODE_ID", "0"));
@@ -31,6 +32,13 @@ public final class ClusterNode
         final int portBase = Integer.parseInt(env("PORT_BASE", "9000"));
 
         final ClusterConfig config = ClusterConfig.create(nodeId, hosts, hosts, portBase, new RfqClusteredService());
+        // ClusterConfig doesn't set this; the member's own ingress endpoint comes from the cluster members string.
+        config.consensusModuleContext().ingressChannel("aeron:udp?term-length=64k");
+        config.mediaDriverContext().errorHandler(errorHandler(nodeId, "media driver"));
+        config.archiveContext().errorHandler(errorHandler(nodeId, "archive"));
+        config.aeronArchiveContext().errorHandler(errorHandler(nodeId, "archive client"));
+        config.consensusModuleContext().errorHandler(errorHandler(nodeId, "consensus module"));
+        config.clusteredServiceContext().errorHandler(errorHandler(nodeId, "service"));
         final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
         try (ClusteredMediaDriver ignoredDriver = ClusteredMediaDriver.launch(
@@ -42,6 +50,15 @@ public final class ClusterNode
             barrier.await();
             System.out.printf("aeronfire node %d shutting down%n", nodeId);
         }
+    }
+
+    private static org.agrona.ErrorHandler errorHandler(final int nodeId, final String component)
+    {
+        return (throwable) ->
+        {
+            System.err.printf("node %d %s error: %s%n", nodeId, component, throwable);
+            throwable.printStackTrace(System.err);
+        };
     }
 
     static String env(final String name, final String defaultValue)

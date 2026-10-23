@@ -19,6 +19,8 @@ import io.aeronfire.sbe.BookSnapshotEncoder;
 import io.aeronfire.sbe.BooleanType;
 import io.aeronfire.sbe.ClientCreditSnapshotDecoder;
 import io.aeronfire.sbe.ClientCreditSnapshotEncoder;
+import io.aeronfire.sbe.CreditResetAckEncoder;
+import io.aeronfire.sbe.CreditResetDecoder;
 import io.aeronfire.sbe.CreditStatusEncoder;
 import io.aeronfire.sbe.CreditUpdateDecoder;
 import io.aeronfire.sbe.MessageHeaderDecoder;
@@ -60,6 +62,8 @@ public final class RfqClusteredService implements ClusteredService
     private final RfqRequestDecoder rfqDecoder = new RfqRequestDecoder();
     private final QuoteAcceptDecoder acceptDecoder = new QuoteAcceptDecoder();
     private final CreditUpdateDecoder creditUpdateDecoder = new CreditUpdateDecoder();
+    private final CreditResetDecoder creditResetDecoder = new CreditResetDecoder();
+    private final CreditResetAckEncoder creditResetAckEncoder = new CreditResetAckEncoder();
     private final QuoteEncoder quoteEncoder = new QuoteEncoder();
     private final TradeEncoder tradeEncoder = new TradeEncoder();
     private final RejectEncoder rejectEncoder = new RejectEncoder();
@@ -147,6 +151,15 @@ public final class RfqClusteredService implements ClusteredService
             {
                 creditUpdateDecoder.wrap(buffer, bodyOffset, blockLength, version);
                 onCreditUpdate(session);
+            }
+            case CreditResetDecoder.TEMPLATE_ID ->
+            {
+                creditResetDecoder.wrap(buffer, bodyOffset, blockLength, version);
+                final int clientId = creditResetDecoder.clientId();
+                creditResetAckEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+                    .clientId(clientId)
+                    .linesReset(credit.resetUtilisation(clientId));
+                offer(session, MessageHeaderEncoder.ENCODED_LENGTH + creditResetAckEncoder.encodedLength());
             }
             default -> reject(session, -1, RejectReason.INVALID_REQUEST);
         }

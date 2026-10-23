@@ -79,6 +79,36 @@ public final class CreditBook
         return Check.OK;
     }
 
+    /**
+     * Start-of-day reset.
+     *
+     * @param clientId client to reset, or -1 for every client.
+     * @return number of credit lines reset.
+     */
+    public int resetUtilisation(final int clientId)
+    {
+        if (clientId == -1)
+        {
+            int count = 0;
+            for (int id = 0; id < CAPACITY; id++)
+            {
+                if (known[id])
+                {
+                    utilised[id] = 0;
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        if (isValidId(clientId) && known[clientId])
+        {
+            utilised[clientId] = 0;
+            return 1;
+        }
+        return 0;
+    }
+
     public void consume(final int clientId, final long notional)
     {
         utilised[clientId] += notional;

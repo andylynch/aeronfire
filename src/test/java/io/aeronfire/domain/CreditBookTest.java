@@ -41,6 +41,22 @@ class CreditBookTest
     }
 
     @Test
+    void resetClearsUtilisationForOneOrAll()
+    {
+        final CreditBook book = CreditBook.withDemoClients();
+        book.consume(0, 10);
+        book.consume(1, 20);
+
+        assertEquals(1, book.resetUtilisation(0));
+        assertEquals(0, book.utilised(0));
+        assertEquals(20, book.utilised(1));
+
+        assertEquals(10, book.resetUtilisation(-1));
+        assertEquals(0, book.utilised(1));
+        assertEquals(0, book.resetUtilisation(500));
+    }
+
+    @Test
     void demoClientsCoverAllTiers()
     {
         final CreditBook book = CreditBook.withDemoClients();
