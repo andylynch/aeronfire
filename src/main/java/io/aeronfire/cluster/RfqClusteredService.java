@@ -258,7 +258,7 @@ public final class RfqClusteredService implements ClusteredService
     {
         final int clientId = creditUpdateDecoder.clientId();
         final Tier tier = Tier.fromCode(creditUpdateDecoder.tierRaw());
-        final long limit = creditUpdateDecoder.limit();
+        final long limit = creditUpdateDecoder.creditLimit();
 
         if (!CreditBook.isValidId(clientId) || null == tier || limit < 0)
         {
@@ -273,7 +273,7 @@ public final class RfqClusteredService implements ClusteredService
         creditStatusEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
             .clientId(clientId)
             .tier(io.aeronfire.sbe.Tier.get((short)tier.ordinal()))
-            .limit(limit)
+            .creditLimit(limit)
             .utilised(utilised);
         offer(session, MessageHeaderEncoder.ENCODED_LENGTH + creditStatusEncoder.encodedLength());
     }
@@ -366,7 +366,7 @@ public final class RfqClusteredService implements ClusteredService
             creditSnapshotEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
                 .clientId(clientId)
                 .tier(io.aeronfire.sbe.Tier.get((short)credit.tier(clientId).ordinal()))
-                .limit(credit.limit(clientId))
+                .creditLimit(credit.limit(clientId))
                 .utilised(credit.utilised(clientId));
             offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + creditSnapshotEncoder.encodedLength());
             clientsWritten++;
@@ -448,7 +448,7 @@ public final class RfqClusteredService implements ClusteredService
                 credit.upsert(
                     creditSnapshotDecoder.clientId(),
                     Tier.fromCode(creditSnapshotDecoder.tierRaw()),
-                    creditSnapshotDecoder.limit(),
+                    creditSnapshotDecoder.creditLimit(),
                     creditSnapshotDecoder.utilised());
             }
             case SnapshotEndDecoder.TEMPLATE_ID ->

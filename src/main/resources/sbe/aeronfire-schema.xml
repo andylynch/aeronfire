@@ -64,7 +64,7 @@
     <sbe:message name="CreditUpdate" id="3" description="Admin: create or change a client's credit line">
         <field name="clientId" id="1" type="int32"/>
         <field name="tier" id="2" type="Tier"/>
-        <field name="limit" id="3" type="Notional"/>
+        <field name="creditLimit" id="3" type="Notional"/>
         <field name="resetUtilisation" id="4" type="BooleanType"/>
     </sbe:message>
 
@@ -102,7 +102,7 @@
     <sbe:message name="CreditStatus" id="13" description="A client's credit line after an update">
         <field name="clientId" id="1" type="int32"/>
         <field name="tier" id="2" type="Tier"/>
-        <field name="limit" id="3" type="Notional"/>
+        <field name="creditLimit" id="3" type="Notional"/>
         <field name="utilised" id="4" type="Notional"/>
     </sbe:message>
 
@@ -135,7 +135,7 @@
     <sbe:message name="ClientCreditSnapshot" id="23" description="One client's credit line">
         <field name="clientId" id="1" type="int32"/>
         <field name="tier" id="2" type="Tier"/>
-        <field name="limit" id="3" type="Notional"/>
+        <field name="creditLimit" id="3" type="Notional"/>
         <field name="utilised" id="4" type="Notional"/>
     </sbe:message>
 
