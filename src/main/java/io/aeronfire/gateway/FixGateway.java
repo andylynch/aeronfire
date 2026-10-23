@@ -50,7 +50,10 @@ import uk.co.real_logic.artio.builder.Encoder;
 
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * FIX gateway: the dealer's side of a Tradeweb-style RFQ venue.
@@ -93,27 +96,40 @@ public final class FixGateway implements EgressListener
     private final IdleStrategy sendIdle = new BackoffIdleStrategy();
     private final GatewayStats stats = new GatewayStats();
 
+    private static final long OFFER_TIMEOUT_MS = 2_000;
+
+    private final ArrayDeque<PendingRfq> pool = new ArrayDeque<>();
+    private final ArrayList<PendingRfq> retired = new ArrayList<>();
+    private final long quoteWaitMs = Long.parseLong(env("QUOTE_WAIT_MS", "5000"));
+    private final long acceptWaitMs = Long.parseLong(env("ACCEPT_WAIT_MS", "5000"));
+    private final long venueIdleMs = Long.parseLong(env("VENUE_IDLE_MS", "30000"));
+
     private AeronCluster cluster;
-    private long nextRfqId = 1;
+    private Supplier<AeronCluster> reconnect;
+    // Ids restart from the clock, not 1, so a restarted gateway can't reuse ids the cluster has already seen.
+    private long nextRfqId = System.currentTimeMillis() * 1_000;
     private long nextRejectExecId = 1;
 
     /**
-     * One live RFQ, from QuoteRequest until trade, reject or pass.
+     * One live RFQ, from QuoteRequest until trade, reject or pass. Pooled: the gateway allocates these per
+     * RFQ otherwise, and they die young. Recycled after the handler that retired them has finished with them.
      */
     static final class PendingRfq
     {
-        final long rfqId;
-        final Session session;
-        final String quoteReqId;
-        final String account;
-        final String securityId;
-        final int instrumentId;
-        final char side;
-        final long notional;
-        long quoteId = -1;
+        long rfqId;
+        Session session;
+        String quoteReqId;
+        String account;
+        String securityId;
+        int instrumentId;
+        char side;
+        long notional;
+        long quoteId;
         String venueTxnId;
+        long lastActivityMs;
+        int acceptSends;
 
-        PendingRfq(
+        PendingRfq init(
             final long rfqId,
             final Session session,
             final String quoteReqId,
@@ -121,7 +137,8 @@ public final class FixGateway implements EgressListener
             final String securityId,
             final int instrumentId,
             final char side,
-            final long notional)
+            final long notional,
+            final long nowMs)
         {
             this.rfqId = rfqId;
             this.session = session;
@@ -131,6 +148,20 @@ public final class FixGateway implements EgressListener
             this.instrumentId = instrumentId;
             this.side = side;
             this.notional = notional;
+            this.quoteId = -1;
+            this.venueTxnId = null;
+            this.lastActivityMs = nowMs;
+            this.acceptSends = 0;
+            return this;
+        }
+
+        void clear()
+        {
+            session = null;
+            quoteReqId = null;
+            account = null;
+            securityId = null;
+            venueTxnId = null;
         }
     }
 
@@ -150,20 +181,27 @@ public final class FixGateway implements EgressListener
                 .acceptorfixDictionary(FixDictionaryImpl.class)
                 .authenticationStrategy(AuthenticationStrategy.of(
                     MessageValidationStrategy.targetCompId(GATEWAY_COMP_ID))));
-             AeronCluster cluster = AeronCluster.connect(new AeronCluster.Context()
+             FixLibrary library = artio.connectLibrary(new LibraryConfiguration()
+                .sessionAcquireHandler((session, info) -> gateway.onVenueSession(session))
+                .sessionExistsHandler(new AcquiringSessionExistsHandler(false))))
+        {
+            gateway.reconnect = () -> AeronCluster.connect(new AeronCluster.Context()
                 .egressListener(gateway)
                 .egressChannel("aeron:udp?endpoint=" + egressHost + ":0")
                 .ingressChannel("aeron:udp")
                 .ingressEndpoints(ClusterConfig.ingressEndpoints(hosts, portBase, ClusterConfig.CLIENT_FACING_PORT_OFFSET))
                 .aeronDirectoryName(artio.aeronDirectoryName()));
-             FixLibrary library = artio.connectLibrary(new LibraryConfiguration()
-                .sessionAcquireHandler((session, info) -> gateway.onVenueSession(session))
-                .sessionExistsHandler(new AcquiringSessionExistsHandler(false))))
-        {
-            gateway.cluster = cluster;
+            gateway.cluster = gateway.reconnect.get();
             System.out.printf("gateway up: FIX %s on port %d, cluster leader member %d%n",
-                GATEWAY_COMP_ID, fixPort, cluster.leaderMemberId());
-            gateway.run(library, running);
+                GATEWAY_COMP_ID, fixPort, gateway.cluster.leaderMemberId());
+            try
+            {
+                gateway.run(library, running);
+            }
+            finally
+            {
+                gateway.cluster.close();
+            }
         }
         running.closed();
     }
@@ -173,12 +211,23 @@ public final class FixGateway implements EgressListener
         final IdleStrategy idle = new BackoffIdleStrategy();
         long lastKeepAliveMs = System.currentTimeMillis();
         long lastStatsMs = lastKeepAliveMs;
+        long lastSweepMs = lastKeepAliveMs;
 
         while (running.isRunning())
         {
+            if (cluster.isClosed())
+            {
+                reconnectToCluster(running);
+                continue;
+            }
             final int work = library.poll(10) + cluster.pollEgress();
 
             final long nowMs = System.currentTimeMillis();
+            if (nowMs - lastSweepMs >= 500)
+            {
+                sweep(nowMs);
+                lastSweepMs = nowMs;
+            }
             if (nowMs - lastKeepAliveMs >= 1_000)
             {
                 cluster.sendKeepAlive();
@@ -192,6 +241,140 @@ public final class FixGateway implements EgressListener
 
             idle.idle(work);
         }
+    }
+
+    /**
+     * The cluster client session closed (all members unreachable for too long). Keep the venue sessions up,
+     * keep trying, and let the sweep answer RFQs that were in flight.
+     */
+    private void reconnectToCluster(final ShutdownFlag running)
+    {
+        System.out.println("cluster session closed, reconnecting");
+        while (running.isRunning())
+        {
+            try
+            {
+                cluster.close();
+                cluster = reconnect.get();
+                System.out.printf("reconnected, leader member %d%n", cluster.leaderMemberId());
+                stats.reconnects++;
+                return;
+            }
+            catch (final RuntimeException ex)
+            {
+                System.out.println("reconnect failed: " + ex.getMessage());
+                try
+                {
+                    Thread.sleep(1_000);
+                }
+                catch (final InterruptedException ie)
+                {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    /**
+     * Answer RFQs the cluster hasn't answered. During a leader change replies can be lost, and the venue must
+     * not wait forever.
+     * <ul>
+     *   <li>No quote yet: reject the RFQ with a timeout.</li>
+     *   <li>Accepted, no trade yet: resend the accept (the cluster rejects a quote that already traded),
+     *       then give up with an UNKNOWN_OUTCOME execution report to be checked against the blotter.</li>
+     *   <li>Quoted, venue hasn't responded: drop it silently once stale.</li>
+     * </ul>
+     */
+    private void sweep(final long nowMs)
+    {
+        if (byRfqId.isEmpty())
+        {
+            return;
+        }
+        final ArrayList<PendingRfq> due = new ArrayList<>();
+        for (final PendingRfq rfq : byRfqId.values())
+        {
+            final long idle = nowMs - rfq.lastActivityMs;
+            if ((rfq.quoteId < 0 && idle > quoteWaitMs) ||
+                (rfq.quoteId >= 0 && rfq.acceptSends > 0 && idle > acceptWaitMs) ||
+                (rfq.quoteId >= 0 && rfq.acceptSends == 0 && idle > venueIdleMs))
+            {
+                due.add(rfq);
+            }
+        }
+        for (final PendingRfq rfq : due)
+        {
+            if (rfq.quoteId < 0)
+            {
+                stats.timeouts++;
+                forget(rfq);
+                fixQuoteRequestReject.reset();
+                fixQuoteRequestReject.quoteReqID(rfq.quoteReqId)
+                    .quoteRequestRejectReason(QuoteRequestRejectReason.OTHER).text("TIMEOUT");
+                send(rfq.session, fixQuoteRequestReject);
+            }
+            else if (rfq.acceptSends == 0)
+            {
+                stats.expired++;
+                forget(rfq);
+            }
+            else if (rfq.acceptSends < 3)
+            {
+                stats.resends++;
+                sendAccept(rfq, nowMs);
+            }
+            else
+            {
+                stats.unknownOutcomes++;
+                forget(rfq);
+                fixExecutionReport.reset();
+                fixExecutionReport
+                    .orderID(Long.toString(rfq.quoteId))
+                    .execID("R" + nextRejectExecId++)
+                    .execType(ExecType.REJECTED)
+                    .ordStatus(OrdStatus.REJECTED)
+                    .quoteReqID(rfq.quoteReqId)
+                    .quoteID(Long.toString(rfq.quoteId))
+                    .account(rfq.account)
+                    .side(rfq.side)
+                    .text("UNKNOWN_OUTCOME: check the blotter before retrying");
+                fixExecutionReport.instrument().securityID(rfq.securityId).securityIDSource("8");
+                send(rfq.session, fixExecutionReport);
+            }
+        }
+        flushRetired();
+    }
+
+    private void sendAccept(final PendingRfq rfq, final long nowMs)
+    {
+        rfq.acceptSends++;
+        rfq.lastActivityMs = nowMs;
+        acceptEncoder.wrapAndApplyHeader(ingressBuffer, 0, headerEncoder)
+            .rfqId(rfq.rfqId)
+            .quoteId(rfq.quoteId)
+            .venueTxnId(rfq.venueTxnId == null ? "" : rfq.venueTxnId);
+        offerToCluster(MessageHeaderEncoder.ENCODED_LENGTH + acceptEncoder.encodedLength());
+    }
+
+    private PendingRfq newRfq()
+    {
+        final PendingRfq pooled = pool.pollFirst();
+        return null != pooled ? pooled : new PendingRfq();
+    }
+
+    /**
+     * Return retired RFQs to the pool. Deferred until the handler that retired them is done reading them.
+     */
+    private void flushRetired()
+    {
+        for (int i = 0, n = retired.size(); i < n; i++)
+        {
+            final PendingRfq rfq = retired.get(i);
+            rfq.clear();
+            pool.addFirst(rfq);
+        }
+        retired.clear();
     }
 
     private SessionHandler onVenueSession(final Session session)
@@ -262,7 +445,7 @@ public final class FixGateway implements EgressListener
         final char side = fixQuoteRequest.side();
         final long rfqId = nextRfqId++;
 
-        final PendingRfq rfq = new PendingRfq(
+        final PendingRfq rfq = newRfq().init(
             rfqId,
             session,
             fixQuoteRequest.quoteReqIDAsString(),
@@ -270,7 +453,8 @@ public final class FixGateway implements EgressListener
             securityId,
             parseIntOr(securityId, -1),
             side,
-            wholeUnits(fixQuoteRequest.orderQty()));
+            wholeUnits(fixQuoteRequest.orderQty()),
+            System.currentTimeMillis());
         byRfqId.put(rfqId, rfq);
 
         rfqEncoder.wrapAndApplyHeader(ingressBuffer, 0, headerEncoder)
@@ -297,30 +481,35 @@ public final class FixGateway implements EgressListener
             stats.hits++;
             // The venue's trade id (FIX TrdMatchID) is the MiFIR TVTIC; carry it onto the trade.
             rfq.venueTxnId = fixQuoteResponse.trdMatchIDAsString();
-            acceptEncoder.wrapAndApplyHeader(ingressBuffer, 0, headerEncoder)
-                .rfqId(rfq.rfqId)
-                .quoteId(quoteId)
-                .venueTxnId(rfq.venueTxnId == null ? "" : rfq.venueTxnId);
-            offerToCluster(MessageHeaderEncoder.ENCODED_LENGTH + acceptEncoder.encodedLength());
+            sendAccept(rfq, System.currentTimeMillis());
         }
         else
         {
             stats.passes++;
             forget(rfq);
+            flushRetired();
         }
     }
 
-    private void offerToCluster(final int length)
+    /**
+     * Offer to the cluster, polling egress while waiting: the client only learns about a new leader by
+     * polling, so a bare retry loop would spin forever through a failover. Gives up after a couple of seconds;
+     * the sweep answers whatever was left waiting.
+     */
+    private boolean offerToCluster(final int length)
     {
         sendIdle.reset();
+        final long deadline = System.currentTimeMillis() + OFFER_TIMEOUT_MS;
         while (cluster.offer(ingressBuffer, 0, length) < 0)
         {
-            if (cluster.isClosed())
+            if (cluster.isClosed() || System.currentTimeMillis() > deadline)
             {
-                throw new IllegalStateException("cluster session closed");
+                stats.sendFailures++;
+                return false;
             }
-            sendIdle.idle();
+            sendIdle.idle(cluster.pollEgress());
         }
+        return true;
     }
 
     // ---------------------------------------------------------------- cluster to venue
@@ -360,6 +549,7 @@ public final class FixGateway implements EgressListener
             {
             }
         }
+        flushRetired();
     }
 
     private void onClusterQuote()
@@ -372,6 +562,7 @@ public final class FixGateway implements EgressListener
 
         stats.quotesOut++;
         rfq.quoteId = clusterQuote.quoteId();
+        rfq.lastActivityMs = System.currentTimeMillis();
         byQuoteId.put(rfq.quoteId, rfq);
 
         fixQuote.reset();
@@ -461,7 +652,8 @@ public final class FixGateway implements EgressListener
                 .quoteID(Long.toString(correlationId))
                 .account(rfq.account)
                 .side(rfq.side)
-                .text(reason.name());
+                .text(rfq.acceptSends > 1 ? reason.name() + " after resend: it may already have traded, check the blotter"
+                    : reason.name());
             fixExecutionReport.instrument().securityID(rfq.securityId).securityIDSource("8");
             send(rfq.session, fixExecutionReport);
         }
@@ -486,6 +678,7 @@ public final class FixGateway implements EgressListener
         {
             byQuoteId.remove(rfq.quoteId);
         }
+        retired.add(rfq);
     }
 
     private void send(final Session session, final Encoder encoder)
@@ -557,12 +750,20 @@ public final class FixGateway implements EgressListener
         long rejects;
         long unknownResponses;
         long sendFailures;
+        long timeouts;
+        long expired;
+        long resends;
+        long unknownOutcomes;
+        long reconnects;
 
         void print(final int liveRfqs)
         {
             System.out.printf(
-                "gateway: rfqs %d  quotes %d  hits %d  passes %d  trades %d  rejects %d  live %d%s%n",
+                "gateway: rfqs %d  quotes %d  hits %d  passes %d  trades %d  rejects %d  live %d%s%s%n",
                 rfqsIn, quotesOut, hits, passes, trades, rejects, liveRfqs,
+                timeouts + expired + resends + unknownOutcomes + reconnects > 0
+                    ? "  timeouts " + timeouts + " expired " + expired + " resends " + resends + " unknown " +
+                    unknownOutcomes + " reconnects " + reconnects : "",
                 sendFailures > 0 ? "  SEND FAILURES " + sendFailures : "");
         }
     }
