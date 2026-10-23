@@ -191,7 +191,7 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Credit and inventory admin, RTS 6 controls, entitlements with four-eyes (control plane, MBeans, Jolokia).
 - [x] Reference data: GLEIF, FIRDS and UK sanctions providers, screening, golden copy with audit.
 - [x] Post-trade: booking, clearing instructions, MiFIR reporting, APA, hospital, replay, record keeping.
-- [ ] Post-trade UI page and MBeans/Jolokia for the hospital.
+- [x] Post-trade page (http://localhost:8096) and `aeronfire:type=PostTrade` MBean (Jolokia :8779).
 - [ ] Failover test: in-process 3-member cluster, kill the leader mid-flow, assert no lost or duplicated trades.
 - [ ] Gateway: reconnect to the new leader mid-flow, sweep stale RFQs, pool per-RFQ state.
 - [ ] Client reconnects and resends on leader change (idempotent RFQ ids).

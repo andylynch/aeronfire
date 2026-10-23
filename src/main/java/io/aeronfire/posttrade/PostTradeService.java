@@ -243,6 +243,14 @@ public final class PostTradeService implements EgressListener
                 return users.check(user, password);
             }
         };
+        server.createContext("/", (ex) ->
+        {
+            try (var in = PostTradeService.class.getResourceAsStream("/web/posttrade.html"))
+            {
+                send(ex, null == in ? 500 : 200, "text/html", null == in ? "posttrade.html missing" :
+                    new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            }
+        }).setAuthenticator(auth);
         server.createContext("/api/state", (ex) -> send(ex, 200, "application/json",
             "{\"nextSeq\":" + nextSeq + ",\"feedLag\":" + feedLag + "," + postTrade.json().substring(1))).setAuthenticator(auth);
         server.createContext("/api/records", this::records).setAuthenticator(auth);
@@ -354,6 +362,9 @@ public final class PostTradeService implements EgressListener
                 .ingressEndpoints(ClusterConfig.ingressEndpoints(hosts, portBase, ClusterConfig.CLIENT_FACING_PORT_OFFSET))
                 .aeronDirectoryName(driver.aeronDirectoryName())))
         {
+            java.lang.management.ManagementFactory.getPlatformMBeanServer().registerMBean(
+                new javax.management.StandardMBean(new PostTradeBean(pt), PostTradeMBean.class),
+                new javax.management.ObjectName("aeronfire:type=PostTrade"));
             final HttpServer http = service.serve(Integer.parseInt(env("POSTTRADE_HTTP_PORT", "8096")),
                 new Users(System.getenv("CONTROL_USERS")));
             System.out.println("post-trade up: resuming feed at seq " + service.nextSeq + ", API http://localhost:8096/api/state");

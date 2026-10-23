@@ -111,10 +111,12 @@ services:
       REFDATA_URL: http://refdata:8095
       DATA_DIR: /data
       POSTTRADE_HTTP_PORT: "8096"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8779,host=0.0.0.0,user=jolokia,password=jolokia
     volumes:
       - posttrade-data:/data
     ports:
       - "8096:8096"
+      - "8779:8779"
     depends_on: [node0, node1, node2, refdata]
 
   tui:

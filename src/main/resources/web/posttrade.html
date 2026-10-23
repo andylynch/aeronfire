@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aeronfire post-trade</title>
+<style>
+  :root { --bg:#0b0e13; --panel:#121721; --line:#1f2633; --text:#d7dde8; --muted:#7d8799; --ok:#3ecf8e; --bad:#ff6b6b; --warn:#f2b84b;
+    --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:13px/1.45 system-ui,sans-serif; }
+  header { display:flex; gap:16px; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  h1 { margin:0; font-size:16px; } .muted { color:var(--muted); font-family:var(--mono); font-size:12px; }
+  main { padding:16px; display:grid; gap:14px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font:12px var(--mono); }
+  th { text-align:left; color:var(--muted); font-weight:500; padding:4px 6px; border-bottom:1px solid var(--line); }
+  td { padding:4px 6px; border-bottom:1px solid #161c27; white-space:nowrap; }
+  td.issues { white-space:normal; min-width:260px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  form { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  input { background:#0e131b; border:1px solid var(--line); color:var(--text); border-radius:4px; padding:6px 8px; font:12px var(--mono); min-width:0; }
+  button { background:#1b2433; border:1px solid #2a3547; color:var(--text); border-radius:4px; padding:6px 10px; cursor:pointer; }
+  #toast { position:fixed; right:16px; bottom:16px; max-width:calc(100vw - 32px); padding:10px 14px; border-radius:6px; background:#1b2433; border:1px solid #2a3547; display:none; }
+</style>
+</head>
+<body>
+<header><h1>post-trade</h1><span class="muted" id="status">loading</span></header>
+<main>
+  <section><h2>Hospital</h2>
+    <div class="scroll"><table><thead><tr><th>#</th><th>trade</th><th>stage</th><th>state</th><th>issues</th></tr></thead><tbody id="hospital"></tbody></table></div>
+    <form id="repair"><input name="item" placeholder="item #" size="6" required><input name="field" placeholder="report field" size="14"><input name="value" placeholder="new value" size="18">
+      <input name="reason" placeholder="reason (required)" size="28"><button type="submit">repair</button><button type="button" id="resubmit">resubmit</button></form>
+    <form id="replay"><input name="from" placeholder="from seq" size="9"><input name="to" placeholder="to seq" size="9"><button type="submit">replay range</button>
+      <button type="button" id="verify">verify record chain</button></form>
+  </section>
+  <section><h2>Trades</h2>
+    <div class="scroll"><table><thead><tr><th>trade</th><th>client</th><th>instr</th><th>side</th><th>notional</th><th>price</th><th>settle</th><th>consideration</th><th>clearing</th><th>report</th><th>APA</th><th>TVTIC</th></tr></thead><tbody id="trades"></tbody></table></div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 6000); }
+async function post(path, form) {
+  const r = await fetch('/api/' + path, { method: 'POST', body: new URLSearchParams(form) });
+  toast(await r.text()); load();
+}
+function cls(s) { return /ACCEPTED|MATCHED|AMENDED|DUPLICATE/.test(s) ? 'ok' : /HOSPITAL|NACK/.test(s) ? 'bad' : 'muted'; }
+async function load() {
+  try {
+    const s = await (await fetch('/api/state')).json();
+    const open = s.hospital.filter(h => h.open).length;
+    $('status').textContent = `${s.trades.length} trades | ${open} open hospital | clearer ${s.clearer} arm ${s.arm} apa ${s.apa} | records ${s.records} | feed seq ${s.nextSeq} lag ${s.feedLag}`;
+    $('hospital').innerHTML = s.hospital.slice().reverse().map(h =>
+      `<tr><td>${h.id}</td><td>${h.trade}</td><td>${h.stage}</td><td class="${h.open ? 'bad' : 'ok'}">${h.open ? 'OPEN' : 'resolved by ' + esc(h.resolvedBy)}</td><td class="issues">${h.issues.map(esc).join('<br>')}</td></tr>`).join('');
+    $('trades').innerHTML = s.trades.slice(-100).reverse().map(t =>
+      `<tr><td>${t.tradeId}</td><td>${t.client}</td><td>${t.instrument}</td><td>${t.side}</td><td>${t.notional.toLocaleString()}</td><td>${t.price.toFixed(4)}</td><td>${esc(t.settle)}</td><td>${t.consideration.toLocaleString()}</td>` +
+      `<td class="${cls(t.clearing)}">${esc(t.clearing)}</td><td class="${cls(t.report)}">${esc(t.report)}</td><td>${esc(t.transparency)}</td><td>${esc(t.tvtic)}</td></tr>`).join('');
+  } catch (e) { $('status').textContent = 'disconnected'; }
+}
+$('repair').addEventListener('submit', (e) => { e.preventDefault(); post('repair', new FormData(e.target)); });
+$('replay').addEventListener('submit', (e) => { e.preventDefault(); post('replay', new FormData(e.target)); });
+$('resubmit').addEventListener('click', () => post('resubmit', { item: document.querySelector('#repair [name=item]').value }));
+$('verify').addEventListener('click', async () => toast(JSON.stringify(await (await fetch('/api/verify')).json())));
+load(); setInterval(load, 2000);
+</script>
+</body>
+</html>
