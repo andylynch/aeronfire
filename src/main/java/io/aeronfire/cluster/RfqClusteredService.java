@@ -108,6 +108,7 @@ public final class RfqClusteredService implements ClusteredService
     private static final int OPEN_QUOTE_CAPACITY = 4096;
     private static final int JOURNAL_CAPACITY = 1 << 16;
     private static final int MAX_FEED_BATCH = 512;
+    private static final int REPLAY_SCAN_EVENTS = 8_192; // how far back a resent accept looks for its trade
     private static final int MAX_SUBSCRIBERS = 16;
     private static final byte[] CONTROL_PRINCIPAL = ClusterAuthenticator.CONTROL_PRINCIPAL.getBytes(StandardCharsets.US_ASCII);
     private static final int ANY = -2; // scope check not applicable
@@ -284,6 +285,14 @@ public final class RfqClusteredService implements ClusteredService
         final long notional = rfqDecoder.notional();
         final boolean validSide = sideRaw == Side.BUY.value() || sideRaw == Side.SELL.value();
 
+        // A resent RFQ (the client lost the reply across a failover) gets its existing quote back, not a second one.
+        final int existing = openQuotes.findByRfq(rfqId, session.id());
+        if (existing >= 0)
+        {
+            resendQuote(session, existing);
+            return;
+        }
+
         // Record the request before any check: rejected requests are part of the order record too.
         final int event = journal.append(EventJournal.RFQ, timestamp);
         journal.ids(event, rfqId, -1, -1);
@@ -343,7 +352,8 @@ public final class RfqClusteredService implements ClusteredService
 
         final long quoteId = nextQuoteId++;
         final long validUntil = timestamp + tier.quoteTtlMs();
-        openQuotes.put(quoteId, rfqId, session.id(), clientId, instrumentId, clientBuys, notional, priceE6, validUntil);
+        openQuotes.put(quoteId, rfqId, session.id(), clientId, instrumentId, clientBuys, notional, priceE6, validUntil,
+            spreadBps);
 
         final int quoteEvent = journal.append(EventJournal.QUOTE, timestamp);
         journal.ids(quoteEvent, rfqId, quoteId, -1);
@@ -363,6 +373,58 @@ public final class RfqClusteredService implements ClusteredService
         offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + quoteEncoder.encodedLength());
     }
 
+    private void resendQuote(final ClientSession session, final int slot)
+    {
+        quoteEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+            .rfqId(openQuotes.rfqIdAt(slot))
+            .quoteId(openQuotes.quoteIdAt(slot))
+            .clientId(openQuotes.clientIdAt(slot))
+            .instrumentId(openQuotes.instrumentIdAt(slot))
+            .side(openQuotes.clientBuysAt(slot) ? Side.BUY : Side.SELL)
+            .notional(openQuotes.notionalAt(slot))
+            .price(openQuotes.priceE6At(slot))
+            .spreadBps(openQuotes.spreadBpsAt(slot))
+            .validUntil(openQuotes.validUntilAt(slot));
+        offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + quoteEncoder.encodedLength());
+    }
+
+    /**
+     * An accept for a quote that is no longer open may be a resend of one that already traded, whose reply was
+     * lost in a failover. Look for that trade in the recent journal and, if found, send the same Trade again.
+     * No state changes and nothing is journalled: a replay of the answer, not a second execution. The rfq id
+     * and quote id must both match.
+     *
+     * @return true if a trade was found and resent.
+     */
+    private boolean resendTrade(final ClientSession session, final long rfqId, final long quoteId)
+    {
+        final long newest = journal.next() - 1;
+        final long oldest = Math.max(journal.oldest(), newest - REPLAY_SCAN_EVENTS);
+        for (long seq = newest; seq >= oldest; seq--)
+        {
+            final int slot = journal.slotOf(seq);
+            if (journal.typeAt(slot) == EventJournal.TRADE && journal.quoteIdAt(slot) == quoteId &&
+                journal.rfqIdAt(slot) == rfqId)
+            {
+                tradeEncoder.wrapAndApplyHeader(egressBuffer, 0, headerEncoder)
+                    .tradeId(journal.tradeIdAt(slot))
+                    .rfqId(rfqId)
+                    .quoteId(quoteId)
+                    .clientId(journal.clientIdAt(slot))
+                    .instrumentId(journal.instrumentIdAt(slot))
+                    .side(journal.sideAt(slot) == Side.BUY.value() ? Side.BUY : Side.SELL)
+                    .notional(journal.notionalAt(slot))
+                    .price(journal.priceE6At(slot))
+                    .executedAt(journal.timestampAt(slot))
+                    .clientUtilised(credit.utilised(journal.clientIdAt(slot)))
+                    .putVenueTxnId(journal.venueTxnIdBytes(), slot * EventJournal.VENUE_TXN_ID_LENGTH);
+                offerAndCopy(session, MessageHeaderEncoder.ENCODED_LENGTH + tradeEncoder.encodedLength());
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void onAccept(final ClientSession session, final long timestamp)
     {
         final long rfqId = acceptDecoder.rfqId();
@@ -370,6 +432,10 @@ public final class RfqClusteredService implements ClusteredService
         final int slot = openQuotes.find(quoteId);
         final int t = QuoteAcceptDecoder.TEMPLATE_ID;
 
+        if (slot < 0 && resendTrade(session, rfqId, quoteId))
+        {
+            return;
+        }
         if (slot < 0 || openQuotes.clusterSessionIdAt(slot) != session.id() || openQuotes.rfqIdAt(slot) != rfqId)
         {
             reject(session, timestamp, quoteId, -1, -1, RejectReason.UNKNOWN_QUOTE, t);
@@ -1188,7 +1254,8 @@ public final class RfqClusteredService implements ClusteredService
                 .side(openQuotes.clientBuysAt(slot) ? Side.BUY : Side.SELL)
                 .notional(openQuotes.notionalAt(slot))
                 .price(openQuotes.priceE6At(slot))
-                .validUntil(openQuotes.validUntilAt(slot));
+                .validUntil(openQuotes.validUntilAt(slot))
+                .spreadBps(openQuotes.spreadBpsAt(slot));
             offerSnapshot(snapshotPublication, MessageHeaderEncoder.ENCODED_LENGTH + quoteSnapshotEncoder.encodedLength());
             quotesWritten++;
         }
@@ -1375,7 +1442,8 @@ public final class RfqClusteredService implements ClusteredService
                     quoteSnapshotDecoder.side() == Side.BUY,
                     quoteSnapshotDecoder.notional(),
                     quoteSnapshotDecoder.price(),
-                    quoteSnapshotDecoder.validUntil());
+                    quoteSnapshotDecoder.validUntil(),
+                    quoteSnapshotDecoder.spreadBps());
             }
             case ClientCreditSnapshotDecoder.TEMPLATE_ID ->
             {

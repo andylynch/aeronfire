@@ -154,6 +154,7 @@ class FailoverTest
 
             final Set<Long> ambiguous = new HashSet<>(); // accept sent, outcome unknown across the failover
             final Set<Long> acked = new HashSet<>();     // quote ids the client was told were filled
+            final Map<Long, Long> rfqOfQuote = new HashMap<>();
             boolean killed = false;
             int leaderKilled = -1;
 
@@ -185,6 +186,7 @@ class FailoverTest
                 if (outcome == 1)
                 {
                     acked.add(quoteId);
+                    rfqOfQuote.put(quoteId, rfqId);
                 }
                 else if (outcome == 0)
                 {
@@ -210,8 +212,20 @@ class FailoverTest
             final Set<Long> unexplained = new HashSet<>(filledQuotes);
             unexplained.removeAll(acked);
             unexplained.removeAll(ambiguous);
-            // Trades the client never saw an answer for must be explained by an accept it did send.
-            assertTrue(unexplained.size() <= 3, "trades nobody asked for: " + unexplained);
+            // Every journal trade is one the client was told about, or one whose reply never came at all.
+            assertTrue(unexplained.isEmpty(), "trades nobody asked for: " + unexplained);
+
+            // Idempotency: resending an accept for a filled quote replays the same trade and executes nothing new.
+            final long replayQuote = acked.iterator().next();
+            final long firstTradeId = listener.tradeByQuote.get(replayQuote);
+            final int tradesBefore = listener.journalTrades.size();
+            listener.tradeByQuote.remove(replayQuote);
+            assertEquals(1, accept(rfqOfQuote.get(replayQuote), replayQuote, null), "resent accept is answered with the trade");
+            assertEquals(firstTradeId, (long)listener.tradeByQuote.get(replayQuote), "same trade id replayed");
+            listener.journalTrades.clear();
+            listener.journalSeqs.clear();
+            readJournal();
+            assertEquals(tradesBefore, listener.journalTrades.size(), "the replay did not execute a second trade");
 
             for (int i = 1; i < listener.journalSeqs.size(); i++)
             {
@@ -396,8 +410,8 @@ class FailoverTest
                     {
                         return 1;
                     }
-                    // A reject to a resend may just mean the first send was already filled and its reply was lost.
-                    return attempt == 0 ? -1 : 0;
+                    // The cluster replays the Trade for an already-filled quote, so a reject really means no fill.
+                    return -1;
                 }
             }
         }

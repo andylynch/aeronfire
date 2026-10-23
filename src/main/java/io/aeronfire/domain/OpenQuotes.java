@@ -20,6 +20,11 @@ public final class OpenQuotes
     private final long[] notional;
     private final long[] priceE6;
     private final long[] validUntil;
+    private final int[] spreadBps;
+    // Exact index of live quotes by (rfq id, session), chained through the slots: lets a resent RFQ find its
+    // quote. It holds precisely the live quotes, so it is identical on every member however the state was built.
+    private final int[] bucketHead;
+    private final int[] chainNext;
 
     public OpenQuotes(final int capacityPowerOfTwo)
     {
@@ -38,6 +43,10 @@ public final class OpenQuotes
         notional = new long[capacityPowerOfTwo];
         priceE6 = new long[capacityPowerOfTwo];
         validUntil = new long[capacityPowerOfTwo];
+        spreadBps = new int[capacityPowerOfTwo];
+        bucketHead = new int[capacityPowerOfTwo];
+        chainNext = new int[capacityPowerOfTwo];
+        java.util.Arrays.fill(bucketHead, -1);
         java.util.Arrays.fill(quoteId, NONE);
     }
 
@@ -57,8 +66,28 @@ public final class OpenQuotes
         final long price,
         final long expiry)
     {
+        put(id, rfq, sessionId, client, instrument, buys, size, price, expiry, 0);
+    }
+
+    public void put(
+        final long id,
+        final long rfq,
+        final long sessionId,
+        final int client,
+        final int instrument,
+        final boolean buys,
+        final long size,
+        final long price,
+        final long expiry,
+        final int spread)
+    {
         final int slot = (int)(id & mask);
+        if (quoteId[slot] != NONE)
+        {
+            unlink(slot); // the id wrapped round onto a live quote: evict it
+        }
         quoteId[slot] = id;
+        spreadBps[slot] = spread;
         rfqId[slot] = rfq;
         clusterSessionId[slot] = sessionId;
         clientId[slot] = client;
@@ -67,6 +96,56 @@ public final class OpenQuotes
         notional[slot] = size;
         priceE6[slot] = price;
         validUntil[slot] = expiry;
+        final int bucket = bucket(rfq, sessionId);
+        chainNext[slot] = bucketHead[bucket];
+        bucketHead[bucket] = slot;
+    }
+
+    private int bucket(final long rfq, final long sessionId)
+    {
+        final long h = (rfq * 0x9E3779B97F4A7C15L) ^ (sessionId * 0xC2B2AE3D27D4EB4FL);
+        return (int)(h ^ (h >>> 32)) & mask;
+    }
+
+    private void unlink(final int slot)
+    {
+        final int bucket = bucket(rfqId[slot], clusterSessionId[slot]);
+        int cursor = bucketHead[bucket];
+        if (cursor == slot)
+        {
+            bucketHead[bucket] = chainNext[slot];
+            return;
+        }
+        while (cursor >= 0)
+        {
+            if (chainNext[cursor] == slot)
+            {
+                chainNext[cursor] = chainNext[slot];
+                return;
+            }
+            cursor = chainNext[cursor];
+        }
+    }
+
+    /**
+     * @return slot of the live quote issued for this RFQ on this session, or -1. Lets a client resend an RFQ
+     * after a failover and get the same quote back rather than a second one.
+     */
+    public int findByRfq(final long rfq, final long sessionId)
+    {
+        for (int slot = bucketHead[bucket(rfq, sessionId)]; slot >= 0; slot = chainNext[slot])
+        {
+            if (rfqId[slot] == rfq && clusterSessionId[slot] == sessionId)
+            {
+                return slot;
+            }
+        }
+        return -1;
+    }
+
+    public int spreadBpsAt(final int slot)
+    {
+        return spreadBps[slot];
     }
 
     /**
@@ -84,6 +163,10 @@ public final class OpenQuotes
 
     public void remove(final int slot)
     {
+        if (quoteId[slot] != NONE)
+        {
+            unlink(slot);
+        }
         quoteId[slot] = NONE;
     }
 
@@ -141,7 +224,7 @@ public final class OpenQuotes
         {
             if (quoteId[slot] != NONE && validUntil[slot] < now)
             {
-                quoteId[slot] = NONE;
+                remove(slot);
             }
         }
     }

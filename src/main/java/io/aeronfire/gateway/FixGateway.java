@@ -128,6 +128,7 @@ public final class FixGateway implements EgressListener
         String venueTxnId;
         long lastActivityMs;
         int acceptSends;
+        int rfqSends;
 
         PendingRfq init(
             final long rfqId,
@@ -152,6 +153,7 @@ public final class FixGateway implements EgressListener
             this.venueTxnId = null;
             this.lastActivityMs = nowMs;
             this.acceptSends = 0;
+            this.rfqSends = 0;
             return this;
         }
 
@@ -280,9 +282,9 @@ public final class FixGateway implements EgressListener
      * Answer RFQs the cluster hasn't answered. During a leader change replies can be lost, and the venue must
      * not wait forever.
      * <ul>
-     *   <li>No quote yet: reject the RFQ with a timeout.</li>
-     *   <li>Accepted, no trade yet: resend the accept (the cluster rejects a quote that already traded),
-     *       then give up with an UNKNOWN_OUTCOME execution report to be checked against the blotter.</li>
+     *   <li>No quote yet: resend the RFQ once (the cluster dedupes on RFQ id), then reject it with a timeout.</li>
+     *   <li>Accepted, no trade yet: resend the accept (the cluster replays the original trade if it already
+     *       filled), then give up with an UNKNOWN_OUTCOME execution report to be checked against the blotter.</li>
      *   <li>Quoted, venue hasn't responded: drop it silently once stale.</li>
      * </ul>
      */
@@ -305,7 +307,13 @@ public final class FixGateway implements EgressListener
         }
         for (final PendingRfq rfq : due)
         {
-            if (rfq.quoteId < 0)
+            if (rfq.quoteId < 0 && rfq.rfqSends < 2)
+            {
+                // The cluster returns the existing quote for a resent RFQ id, so this can't double-quote.
+                stats.rfqResends++;
+                sendRfq(rfq, nowMs);
+            }
+            else if (rfq.quoteId < 0)
             {
                 stats.timeouts++;
                 forget(rfq);
@@ -456,12 +464,18 @@ public final class FixGateway implements EgressListener
             wholeUnits(fixQuoteRequest.orderQty()),
             System.currentTimeMillis());
         byRfqId.put(rfqId, rfq);
+        sendRfq(rfq, rfq.lastActivityMs);
+    }
 
+    private void sendRfq(final PendingRfq rfq, final long nowMs)
+    {
+        rfq.rfqSends++;
+        rfq.lastActivityMs = nowMs;
         rfqEncoder.wrapAndApplyHeader(ingressBuffer, 0, headerEncoder)
-            .rfqId(rfqId)
-            .clientId(parseIntOr(account, -1))
+            .rfqId(rfq.rfqId)
+            .clientId(parseIntOr(rfq.account, -1))
             .instrumentId(rfq.instrumentId)
-            .side(side == '1' ? Side.BUY : Side.SELL)
+            .side(rfq.side == '1' ? Side.BUY : Side.SELL)
             .notional(rfq.notional);
         offerToCluster(MessageHeaderEncoder.ENCODED_LENGTH + rfqEncoder.encodedLength());
     }
@@ -652,8 +666,7 @@ public final class FixGateway implements EgressListener
                 .quoteID(Long.toString(correlationId))
                 .account(rfq.account)
                 .side(rfq.side)
-                .text(rfq.acceptSends > 1 ? reason.name() + " after resend: it may already have traded, check the blotter"
-                    : reason.name());
+                .text(reason.name());
             fixExecutionReport.instrument().securityID(rfq.securityId).securityIDSource("8");
             send(rfq.session, fixExecutionReport);
         }
@@ -753,6 +766,7 @@ public final class FixGateway implements EgressListener
         long timeouts;
         long expired;
         long resends;
+        long rfqResends;
         long unknownOutcomes;
         long reconnects;
 
@@ -761,8 +775,8 @@ public final class FixGateway implements EgressListener
             System.out.printf(
                 "gateway: rfqs %d  quotes %d  hits %d  passes %d  trades %d  rejects %d  live %d%s%s%n",
                 rfqsIn, quotesOut, hits, passes, trades, rejects, liveRfqs,
-                timeouts + expired + resends + unknownOutcomes + reconnects > 0
-                    ? "  timeouts " + timeouts + " expired " + expired + " resends " + resends + " unknown " +
+                timeouts + expired + resends + rfqResends + unknownOutcomes + reconnects > 0
+                    ? "  timeouts " + timeouts + " expired " + expired + " resends " + resends + " rfq-resends " + rfqResends + " unknown " +
                     unknownOutcomes + " reconnects " + reconnects : "",
                 sendFailures > 0 ? "  SEND FAILURES " + sendFailures : "");
         }

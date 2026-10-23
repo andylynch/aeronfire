@@ -194,7 +194,7 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Post-trade page (http://localhost:8096) and `aeronfire:type=PostTrade` MBean (Jolokia :8779).
 - [x] Failover test (`./gradlew failoverTest`, in CI): three member JVMs, leader SIGKILLed with an accept in flight, journal checked for lost, duplicated or gapped trades.
 - [x] Gateway: survives a leader change (polls egress while offering, reconnects if the session closes), sweeps stale RFQs (timeout reject, accept resend, UNKNOWN_OUTCOME report), pools per-RFQ state. Verified by killing the leader mid-run: 102 in-flight RFQs got a TIMEOUT reject, trading resumed on the new leader.
-- [ ] Client reconnects and resends on leader change (idempotent RFQ ids).
+- [x] Idempotent RFQ and accept: a resent RFQ id gets its existing quote back, a resent accept for a filled quote replays the original Trade (no second execution). The gateway resends both after a failover; verified: 100 in-flight RFQs resent, 0 timeouts.
 - [ ] Quote expiry via cluster timers instead of check-on-accept.
 - [ ] Aeron Archive replay to rebuild valuations and CS01 as of a past log position.
 - [ ] Risk egress: CS01 / DV01 by issuer on every trade.

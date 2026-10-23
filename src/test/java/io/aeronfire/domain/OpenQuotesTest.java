@@ -51,4 +51,38 @@ class OpenQuotesTest
     {
         assertThrows(IllegalArgumentException.class, () -> new OpenQuotes(10));
     }
+
+    @Test
+    void findsTheQuoteIssuedForAnRfqAndSession()
+    {
+        final OpenQuotes quotes = new OpenQuotes(8);
+        quotes.put(1, 100, 7, 0, 0, true, 1, 1, 1_000, 42);
+        quotes.put(2, 100, 8, 0, 0, true, 1, 1, 1_000, 43); // same rfq id, different session
+        quotes.put(3, 101, 7, 0, 0, true, 1, 1, 1_000, 44);
+
+        assertEquals(1, quotes.quoteIdAt(quotes.findByRfq(100, 7)));
+        assertEquals(2, quotes.quoteIdAt(quotes.findByRfq(100, 8)));
+        assertEquals(44, quotes.spreadBpsAt(quotes.findByRfq(101, 7)));
+        assertEquals(-1, quotes.findByRfq(102, 7));
+    }
+
+    @Test
+    void indexTracksRemovalExpiryAndEviction()
+    {
+        final OpenQuotes quotes = new OpenQuotes(8);
+        quotes.put(1, 100, 7, 0, 0, true, 1, 1, 50);
+        quotes.put(2, 101, 7, 0, 0, true, 1, 1, 500);
+        quotes.put(3, 102, 7, 0, 0, true, 1, 1, 500);
+
+        quotes.remove(quotes.find(2));
+        assertEquals(-1, quotes.findByRfq(101, 7));
+
+        quotes.expire(100);
+        assertEquals(-1, quotes.findByRfq(100, 7));
+        assertEquals(3, quotes.quoteIdAt(quotes.findByRfq(102, 7)));
+
+        quotes.put(11, 103, 7, 0, 0, true, 1, 1, 500); // 11 wraps onto slot 3 and evicts quote 3
+        assertEquals(-1, quotes.findByRfq(102, 7));
+        assertEquals(11, quotes.quoteIdAt(quotes.findByRfq(103, 7)));
+    }
 }
