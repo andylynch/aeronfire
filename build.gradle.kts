@@ -112,6 +112,7 @@ val launchers = mapOf(
     "control" to "io.aeronfire.control.ControlPlane",
     "refdata" to "io.aeronfire.refdata.RefDataService",
     "posttrade" to "io.aeronfire.posttrade.PostTradeService",
+    "risk-as-of" to "io.aeronfire.tools.RiskAsOf",
 )
 
 val extraStartScripts = launchers.map { (name, main) ->
@@ -186,6 +187,14 @@ tasks.register<JavaExec>("runPostTrade") {
     group = "application"
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.posttrade.PostTradeService"
+    jvmArgs(aeronJvmArgs)
+}
+
+tasks.register<JavaExec>("runRiskAsOf") {
+    description = "Rebuilds positions, mark, CS01 and DV01 as of a past journal point from an archived snapshot."
+    group = "application"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass = "io.aeronfire.tools.RiskAsOf"
     jvmArgs(aeronJvmArgs)
 }
 

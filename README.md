@@ -168,6 +168,21 @@ PROJECT=my-project ./deploy/gcp/down.sh
 Spot pricing, a nightly stop schedule (22:00 London) and an optional budget alert. Defaults to
 `europe-west1`; set `REGION=europe-west4` for the fallback.
 
+### Risk as of a past point
+
+The cluster records its snapshots in the Aeron Archive. `RiskAsOf` replays the latest service snapshot
+(stream 106) from a member's archive, reads the positions and the event journal inside it, rolls positions
+back to any journal sequence or time, and revalues with the pricer: mark, CS01, DV01 and an optional
+parallel spread shock. It never touches the running cluster.
+
+```bash
+# take a snapshot on the leader (control plane: takeSnapshot, or Aeron's ClusterTool)
+ASOF_SEQ=150 SHOCK_BPS=25 ./gradlew runRiskAsOf          # or ASOF_TIME=2026-10-23T09:30:00Z
+```
+
+`ARCHIVE_NODE` picks the member, `REPLAY_ENDPOINT` is where the replay is delivered. The reach back is the
+journal carried in the snapshot (the most recent events); older points need an earlier snapshot.
+
 ### Requirements
 
 JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona need on recent JDKs:
@@ -196,7 +211,7 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Gateway: survives a leader change (polls egress while offering, reconnects if the session closes), sweeps stale RFQs (timeout reject, accept resend, UNKNOWN_OUTCOME report), pools per-RFQ state. Verified by killing the leader mid-run: 102 in-flight RFQs got a TIMEOUT reject, trading resumed on the new leader.
 - [x] Idempotent RFQ and accept: a resent RFQ id gets its existing quote back, a resent accept for a filled quote replays the original Trade (no second execution). The gateway resends both after a failover; verified: 100 in-flight RFQs resent, 0 timeouts.
 - [x] Quote expiry via cluster timers (one per quote, QuoteExpired egress, state released on every member; tested after a leader kill).
-- [ ] Aeron Archive replay to rebuild valuations and CS01 as of a past log position.
+- [x] Aeron Archive replay to rebuild valuations and CS01 as of a past log position (`RiskAsOf`, see below).
 - [x] Risk egress: the cluster computes CS01 and DV01 (and mark) after every trade and position adjustment and pushes `RiskUpdate` to monitors, with book totals; the blotter shows them. One bond per issuer here, so by-issuer equals by-instrument; with this single-curve pricer DV01 equals CS01 numerically.
 - [ ] Latency report: HdrHistogram per hop, ZGC vs G1, bare metal vs cloud.
 - [ ] JMH benchmarks for the pricer and codecs.
