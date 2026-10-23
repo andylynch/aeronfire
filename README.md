@@ -200,6 +200,18 @@ reports. The service tail rows merge per-interval histograms conservatively (wor
 Numbers from a 2-vCPU sandbox running three nodes and the client together are not representative (p50 about
 340us, p99 about 8ms, scheduler noise dominates); the point is the method.
 
+### Microbenchmarks
+
+```bash
+./gradlew jmh                                   # everything
+./gradlew jmh -PjmhArgs="-prof gc Codec"        # codecs only, with allocation rate (expect ~0 B/op)
+```
+
+`PricerBenchmark` covers the quoted spread, price, CS01, DV01, mark and the combined quote-and-risk cost of one
+RFQ; `CodecBenchmark` covers SBE encode and decode of `RfqRequest`, `Quote` and `Trade` plus the service's
+per-RFQ decode-then-encode. Results sit next to the latency report: the service handler time there should be
+about the sum of these plus the cluster bookkeeping (credit, inventory, journal, egress offers).
+
 ### Requirements
 
 JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona need on recent JDKs:
@@ -230,5 +242,5 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Quote expiry via cluster timers (one per quote, QuoteExpired egress, state released on every member; tested after a leader kill).
 - [x] Aeron Archive replay to rebuild valuations and CS01 as of a past log position (`RiskAsOf`, see below).
 - [x] Risk egress: the cluster computes CS01 and DV01 (and mark) after every trade and position adjustment and pushes `RiskUpdate` to monitors, with book totals; the blotter shows them. One bond per issuer here, so by-issuer equals by-instrument; with this single-curve pricer DV01 equals CS01 numerically.
-- [ ] Latency report: HdrHistogram per hop, ZGC vs G1, bare metal vs cloud.
-- [ ] JMH benchmarks for the pricer and codecs.
+- [x] Latency report: HdrHistogram per hop, ZGC vs G1, bare metal vs cloud (`scripts/latency-report.sh`).
+- [x] JMH benchmarks for the pricer and codecs (`./gradlew jmh`).

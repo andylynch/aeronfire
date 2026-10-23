@@ -40,6 +40,18 @@ dependencies {
     testRuntimeOnly(libs.junit.launcher)
 }
 
+// JMH benchmarks live in their own source set (src/jmh/java): run with ./gradlew jmh [-PjmhArgs="-prof gc Pricer"].
+val jmhSourceSet: SourceSet = sourceSets.create("jmh") {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+configurations["jmhImplementation"].extendsFrom(configurations.implementation.get())
+configurations["jmhRuntimeOnly"].extendsFrom(configurations.runtimeOnly.get())
+dependencies {
+    "jmhImplementation"(libs.jmh.core)
+    "jmhAnnotationProcessor"(libs.jmh.annprocess)
+}
+
 // JVM flags Aeron/Agrona need on JDK 24+ (Unsafe memory access is deprecated for removal).
 val aeronJvmArgs = listOf(
     "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
@@ -189,6 +201,18 @@ tasks.register<JavaExec>("runPostTrade") {
     mainClass = "io.aeronfire.posttrade.PostTradeService"
     jvmArgs(aeronJvmArgs)
 }
+
+tasks.register<JavaExec>("jmh") {
+    description = "Runs the JMH benchmarks (pricer, SBE codecs). Pass JMH options with -PjmhArgs=\"-prof gc\"."
+    group = "verification"
+    classpath = jmhSourceSet.runtimeClasspath
+    mainClass = "org.openjdk.jmh.Main"
+    jvmArgs(aeronJvmArgs)
+    args((providers.gradleProperty("jmhArgs").orNull ?: "").split(" ").filter { it.isNotBlank() })
+}
+
+// Compile the benchmarks as part of check so they cannot rot unnoticed.
+tasks.named("check") { dependsOn("jmhClasses") }
 
 tasks.register<JavaExec>("runRiskAsOf") {
     description = "Rebuilds positions, mark, CS01 and DV01 as of a past journal point from an archived snapshot."
