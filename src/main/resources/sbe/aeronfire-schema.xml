@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sbe:messageSchema xmlns:sbe="http://fixprotocol.io/2016/sbe"
+                   package="io.aeronfire.sbe"
+                   id="701"
+                   version="1"
+                   semanticVersion="0.1.0"
+                   description="aeronfire credit RFQ messages"
+                   byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+        <composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint16"/>
+        </composite>
+
+        <!-- Prices are fixed-point: price per 100 nominal, scaled by 1e6. Notionals are whole currency units. -->
+        <type name="PriceE6" primitiveType="int64"/>
+        <type name="Notional" primitiveType="int64"/>
+        <type name="Bps" primitiveType="int32"/>
+
+        <enum name="Side" encodingType="uint8">
+            <validValue name="BUY">0</validValue>
+            <validValue name="SELL">1</validValue>
+        </enum>
+        <enum name="RejectReason" encodingType="uint8">
+            <validValue name="UNKNOWN_INSTRUMENT">0</validValue>
+            <validValue name="UNKNOWN_QUOTE">1</validValue>
+            <validValue name="QUOTE_EXPIRED">2</validValue>
+            <validValue name="INVALID_REQUEST">3</validValue>
+        </enum>
+    </types>
+
+    <!-- Ingress: client to cluster -->
+    <sbe:message name="RfqRequest" id="1" description="Client asks for a price">
+        <field name="rfqId" id="1" type="int64"/>
+        <field name="instrumentId" id="2" type="int32"/>
+        <field name="side" id="3" type="Side" description="Client side: BUY means the client buys from us"/>
+        <field name="notional" id="4" type="Notional"/>
+    </sbe:message>
+
+    <sbe:message name="QuoteAccept" id="2" description="Client lifts or hits a quote">
+        <field name="rfqId" id="1" type="int64"/>
+        <field name="quoteId" id="2" type="int64"/>
+    </sbe:message>
+
+    <!-- Egress: cluster to client -->
+    <sbe:message name="Quote" id="10" description="Firm quote, valid until a cluster timestamp">
+        <field name="rfqId" id="1" type="int64"/>
+        <field name="quoteId" id="2" type="int64"/>
+        <field name="instrumentId" id="3" type="int32"/>
+        <field name="side" id="4" type="Side"/>
+        <field name="notional" id="5" type="Notional"/>
+        <field name="price" id="6" type="PriceE6"/>
+        <field name="spreadBps" id="7" type="Bps"/>
+        <field name="validUntil" id="8" type="int64" description="Cluster time, ms"/>
+    </sbe:message>
+
+    <sbe:message name="Trade" id="11" description="Executed trade">
+        <field name="tradeId" id="1" type="int64"/>
+        <field name="rfqId" id="2" type="int64"/>
+        <field name="quoteId" id="3" type="int64"/>
+        <field name="instrumentId" id="4" type="int32"/>
+        <field name="side" id="5" type="Side"/>
+        <field name="notional" id="6" type="Notional"/>
+        <field name="price" id="7" type="PriceE6"/>
+        <field name="executedAt" id="8" type="int64" description="Cluster time, ms"/>
+    </sbe:message>
+
+    <sbe:message name="Reject" id="12" description="Request rejected">
+        <field name="correlationId" id="1" type="int64"/>
+        <field name="reason" id="2" type="RejectReason"/>
+    </sbe:message>
+
+    <!--
+        Snapshot: written by the clustered service, read back on restart.
+        One small message per record keeps each well under the snapshot publication's max message length,
+        however many quotes are live. SnapshotEnd marks completion.
+    -->
+    <sbe:message name="BookSnapshot" id="20" description="Counters and positions">
+        <field name="nextQuoteId" id="1" type="int64"/>
+        <field name="nextTradeId" id="2" type="int64"/>
+        <group name="positions" id="3" dimensionType="groupSizeEncoding">
+            <field name="instrumentId" id="4" type="int32"/>
+            <field name="netNotional" id="5" type="Notional"/>
+        </group>
+    </sbe:message>
+
+    <sbe:message name="OpenQuoteSnapshot" id="21" description="One live quote">
+        <field name="quoteId" id="1" type="int64"/>
+        <field name="rfqId" id="2" type="int64"/>
+        <field name="clusterSessionId" id="3" type="int64"/>
+        <field name="instrumentId" id="4" type="int32"/>
+        <field name="side" id="5" type="Side"/>
+        <field name="notional" id="6" type="Notional"/>
+        <field name="price" id="7" type="PriceE6"/>
+        <field name="validUntil" id="8" type="int64"/>
+    </sbe:message>
+
+    <sbe:message name="SnapshotEnd" id="22" description="Marks a complete snapshot">
+        <field name="openQuoteCount" id="1" type="int32"/>
+    </sbe:message>
+</sbe:messageSchema>

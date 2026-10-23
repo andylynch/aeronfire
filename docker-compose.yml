@@ -1,0 +1,48 @@
+# Three cluster members on one host, plus an on-demand load client.
+#   docker compose up -d --build
+#   docker compose run --rm client
+#   docker compose kill node0          # watch a new leader take over
+x-node: &node
+  build: .
+  image: aeronfire:local
+  shm_size: 1g
+  environment: &node-env
+    CLUSTER_HOSTS: node0,node1,node2
+    PORT_BASE: "9000"
+  restart: "no"
+
+services:
+  node0:
+    <<: *node
+    hostname: node0
+    environment:
+      <<: *node-env
+      NODE_ID: "0"
+
+  node1:
+    <<: *node
+    hostname: node1
+    environment:
+      <<: *node-env
+      NODE_ID: "1"
+
+  node2:
+    <<: *node
+    hostname: node2
+    environment:
+      <<: *node-env
+      NODE_ID: "2"
+
+  client:
+    image: aeronfire:local
+    profiles: [client]
+    hostname: client
+    shm_size: 512m
+    entrypoint: ["/app/bin/rfq-client"]
+    environment:
+      CLUSTER_HOSTS: node0,node1,node2
+      PORT_BASE: "9000"
+      EGRESS_HOST: client
+      RFQ_COUNT: "20000"
+      WARMUP_COUNT: "5000"
+    depends_on: [node0, node1, node2]

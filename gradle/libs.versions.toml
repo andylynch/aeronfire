@@ -1,0 +1,18 @@
+[versions]
+# Aeron 1.48.4 ships with Agrona 2.2.4 and SBE 1.35.6. Keep the three in step.
+aeron = "1.48.4"
+sbe = "1.35.6"
+hdrhistogram = "2.2.2"
+junit = "5.12.2"
+
+[libraries]
+aeron-client = { module = "io.aeron:aeron-client", version.ref = "aeron" }
+aeron-driver = { module = "io.aeron:aeron-driver", version.ref = "aeron" }
+aeron-archive = { module = "io.aeron:aeron-archive", version.ref = "aeron" }
+aeron-cluster = { module = "io.aeron:aeron-cluster", version.ref = "aeron" }
+aeron-samples = { module = "io.aeron:aeron-samples", version.ref = "aeron" }
+sbe-tool = { module = "uk.co.real-logic:sbe-tool", version.ref = "sbe" }
+hdrhistogram = { module = "org.hdrhistogram:HdrHistogram", version.ref = "hdrhistogram" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
