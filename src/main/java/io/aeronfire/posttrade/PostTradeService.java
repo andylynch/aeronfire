@@ -25,6 +25,8 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -52,6 +54,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class PostTradeService implements EgressListener
 {
+    private static final Logger LOG = LoggerFactory.getLogger(PostTradeService.class);
+
     private static final int BATCH = 512;
 
     private record ReplayRequest(String user, long from, long to, CompletableFuture<String> result)
@@ -169,7 +173,7 @@ public final class PostTradeService implements EgressListener
         // Events between our checkpoint and the oldest retained one are gone from the cluster. That's a
         // recordable incident: the missing trades have to be recovered from the cluster's snapshots/archive.
         postTrade.keeper().append("JOURNAL_GAP", -1, "system", "{\"wantedFrom\":" + nextSeq + ",\"oldest\":" + oldest + "}");
-        System.out.println("JOURNAL GAP: wanted " + nextSeq + ", oldest available " + oldest);
+        LOG.error("JOURNAL GAP: wanted {}, oldest available {}", nextSeq, oldest);
         nextSeq = oldest;
         checkpoint();
     }
@@ -349,7 +353,7 @@ public final class PostTradeService implements EgressListener
 
         final PostTrade pt = new PostTrade(new HttpRefLookup(env("REFDATA_URL", "http://localhost:8095"),
             env("REFDATA_PASSWORD", "refdata")), new RecordKeeper(dataDir.resolve("records.jsonl")));
-        System.out.println("restored " + pt.restore() + " trades from the record log");
+        LOG.info("restored {} trades from the record log", pt.restore());
         final PostTradeService service = new PostTradeService(pt, dataDir.resolve("checkpoint"));
         final ShutdownFlag running = ShutdownFlag.register();
 
@@ -367,7 +371,7 @@ public final class PostTradeService implements EgressListener
                 new javax.management.ObjectName("aeronfire:type=PostTrade"));
             final HttpServer http = service.serve(Integer.parseInt(env("POSTTRADE_HTTP_PORT", "8096")),
                 new Users(System.getenv("CONTROL_USERS")));
-            System.out.println("post-trade up: resuming feed at seq " + service.nextSeq + ", API http://localhost:8096/api/state");
+            LOG.info("post-trade up: resuming feed at seq {}, API http://localhost:8096/api/state", service.nextSeq);
             service.run(cluster, running);
             http.stop(0);
         }

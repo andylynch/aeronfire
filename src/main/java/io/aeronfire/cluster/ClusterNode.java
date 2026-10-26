@@ -4,6 +4,8 @@ import io.aeron.cluster.ClusteredMediaDriver;
 import io.aeron.cluster.service.ClusteredServiceContainer;
 import io.aeron.samples.cluster.ClusterConfig;
 import org.agrona.concurrent.ShutdownSignalBarrier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -20,6 +22,8 @@ import java.util.List;
  */
 public final class ClusterNode
 {
+    private static final Logger LOG = LoggerFactory.getLogger(ClusterNode.class);
+
     private ClusterNode()
     {
     }
@@ -49,10 +53,10 @@ public final class ClusterNode
              ClusteredServiceContainer ignoredContainer = ClusteredServiceContainer.launch(
                 config.clusteredServiceContext()))
         {
-            System.out.printf("aeronfire node %d up, members %s, port base %d%n", nodeId, hosts, portBase);
+            LOG.info("aeronfire node {} up, members {}, port base {}", nodeId, hosts, portBase);
             startLatencyReporter(nodeId, service.timings());
             barrier.await();
-            System.out.printf("aeronfire node %d shutting down%n", nodeId);
+            LOG.info("aeronfire node {} shutting down", nodeId);
         }
     }
 
@@ -90,8 +94,7 @@ public final class ClusterNode
     {
         return (throwable) ->
         {
-            System.err.printf("node %d %s error: %s%n", nodeId, component, throwable);
-            throwable.printStackTrace(System.err);
+            LOG.error("node {} {} error", nodeId, component, throwable);
         };
     }
 

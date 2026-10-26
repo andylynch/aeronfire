@@ -78,6 +78,8 @@ import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -107,6 +109,8 @@ import java.util.Arrays;
  */
 public final class RfqClusteredService implements ClusteredService
 {
+    private static final Logger LOG = LoggerFactory.getLogger(RfqClusteredService.class);
+
     private static final int OPEN_QUOTE_CAPACITY = 4096;
     private static final int JOURNAL_CAPACITY = 1 << 16;
     private static final int MAX_FEED_BATCH = 512;
@@ -1631,7 +1635,7 @@ public final class RfqClusteredService implements ClusteredService
     {
         if (droppedCopies > 0)
         {
-            System.out.printf("monitor drop copies dropped under back pressure: %d%n", droppedCopies);
+            LOG.warn("monitor drop copies dropped under back pressure: {}", droppedCopies);
         }
     }
 }

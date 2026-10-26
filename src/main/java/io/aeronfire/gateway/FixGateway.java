@@ -35,6 +35,8 @@ import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.co.real_logic.artio.fields.DecimalFloat;
 import uk.co.real_logic.artio.fields.UtcTimestampEncoder;
 import uk.co.real_logic.artio.library.AcquiringSessionExistsHandler;
@@ -73,6 +75,8 @@ import java.util.function.Supplier;
  */
 public final class FixGateway implements EgressListener
 {
+    private static final Logger LOG = LoggerFactory.getLogger(FixGateway.class);
+
     public static final String GATEWAY_COMP_ID = "AERONFIRE";
 
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
@@ -196,7 +200,7 @@ public final class FixGateway implements EgressListener
                 .ingressEndpoints(ClusterConfig.ingressEndpoints(hosts, portBase, ClusterConfig.CLIENT_FACING_PORT_OFFSET))
                 .aeronDirectoryName(artio.aeronDirectoryName()));
             gateway.cluster = gateway.reconnect.get();
-            System.out.printf("gateway up: FIX %s on port %d, cluster leader member %d%n",
+            LOG.info("gateway up: FIX {} on port {}, cluster leader member {}",
                 GATEWAY_COMP_ID, fixPort, gateway.cluster.leaderMemberId());
             try
             {
@@ -253,20 +257,20 @@ public final class FixGateway implements EgressListener
      */
     private void reconnectToCluster(final ShutdownFlag running)
     {
-        System.out.println("cluster session closed, reconnecting");
+        LOG.warn("cluster session closed, reconnecting");
         while (running.isRunning())
         {
             try
             {
                 cluster.close();
                 cluster = reconnect.get();
-                System.out.printf("reconnected, leader member %d%n", cluster.leaderMemberId());
+                LOG.info("reconnected, leader member {}", cluster.leaderMemberId());
                 stats.reconnects++;
                 return;
             }
             catch (final RuntimeException ex)
             {
-                System.out.println("reconnect failed: " + ex.getMessage());
+                LOG.warn("reconnect failed: {}", ex.getMessage());
                 try
                 {
                     Thread.sleep(1_000);
@@ -389,7 +393,7 @@ public final class FixGateway implements EgressListener
 
     private SessionHandler onVenueSession(final Session session)
     {
-        System.out.printf("venue session %s logged in%n", session.compositeKey());
+        LOG.info("venue session {} logged in", session.compositeKey());
         return new SessionHandler()
         {
             @Override
@@ -434,7 +438,7 @@ public final class FixGateway implements EgressListener
             @Override
             public Action onDisconnect(final int libraryId, final Session session, final DisconnectReason reason)
             {
-                System.out.printf("venue session %s disconnected: %s%n", session.compositeKey(), reason);
+                LOG.info("venue session {} disconnected: {}", session.compositeKey(), reason);
                 return Action.CONTINUE;
             }
 
@@ -785,13 +789,13 @@ public final class FixGateway implements EgressListener
 
         void print(final int liveRfqs)
         {
-            System.out.printf(
-                "gateway: rfqs %d  quotes %d  hits %d  passes %d  trades %d  rejects %d  live %d%s%s%n",
+            LOG.info(String.format(
+                "gateway: rfqs %d  quotes %d  hits %d  passes %d  trades %d  rejects %d  live %d%s%s",
                 rfqsIn, quotesOut, hits, passes, trades, rejects, liveRfqs,
                 timeouts + expired + resends + rfqResends + unknownOutcomes + reconnects > 0
                     ? "  timeouts " + timeouts + " expired " + expired + " resends " + resends + " rfq-resends " + rfqResends + " unknown " +
                     unknownOutcomes + " reconnects " + reconnects : "",
-                sendFailures > 0 ? "  SEND FAILURES " + sendFailures : "");
+                sendFailures > 0 ? "  SEND FAILURES " + sendFailures : ""));
         }
     }
 }

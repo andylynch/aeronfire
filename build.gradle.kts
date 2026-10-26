@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.artio.core)
     implementation(libs.artio.codecs)
     implementation(libs.artio.session.codecs)
+    implementation(libs.slf4j.api)
+    runtimeOnly(libs.logback.classic)
 
     sbeCodegen(libs.sbe.tool)
     fixCodegen(libs.artio.codecs)

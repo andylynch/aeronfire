@@ -17,6 +17,8 @@ import org.agrona.DirectBuffer;
 import org.agrona.collections.Object2LongHashMap;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.co.real_logic.artio.Reply;
 import uk.co.real_logic.artio.builder.Encoder;
 import uk.co.real_logic.artio.library.FixLibrary;
@@ -47,6 +49,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class VenueSimulator
 {
+    private static final Logger LOG = LoggerFactory.getLogger(VenueSimulator.class);
+
     public static final String VENUE_COMP_ID = "TWSIM";
 
     private static final long[] SIZES = { 1_000_000L, 2_000_000L, 5_000_000L, 10_000_000L, 20_000_000L, 25_000_000L };
@@ -105,7 +109,7 @@ public final class VenueSimulator
                 .sessionAcquireHandler((session, info) -> venue.handler())))
         {
             venue.session = venue.connect(library, gatewayHost, gatewayPort);
-            System.out.printf("venue connected to %s:%d as %s, %d RFQs/s%n",
+            LOG.info("venue connected to {}:{} as {}, {} RFQs/s",
                 gatewayHost, gatewayPort, VENUE_COMP_ID, rfqsPerSecond);
             venue.run(library, running, rfqsPerSecond, durationSeconds);
             venue.printStats();
@@ -142,7 +146,7 @@ public final class VenueSimulator
                 return session;
             }
 
-            System.out.printf("connect attempt %d failed: %s%n", attempt,
+            LOG.warn("connect attempt {} failed: {}", attempt,
                 reply.hasErrored() ? reply.error() : reply.state());
             final long until = System.currentTimeMillis() + 1_000;
             while (System.currentTimeMillis() < until)
@@ -268,7 +272,7 @@ public final class VenueSimulator
             @Override
             public Action onDisconnect(final int libraryId, final Session session, final DisconnectReason reason)
             {
-                System.out.printf("disconnected from gateway: %s%n", reason);
+                LOG.warn("disconnected from gateway: {}", reason);
                 return Action.CONTINUE;
             }
 
@@ -354,19 +358,19 @@ public final class VenueSimulator
     private void printStats()
     {
         final long decided = weWon + weLost;
-        System.out.printf(
-            "venue: rfqs %d  quotes %d  won %d (%.0f%%)  trades %d  rfq rejects %d  trade rejects %d%n",
-            rfqs, quotes, weWon, decided == 0 ? 0.0 : 100.0 * weWon / decided, trades, rfqRejects, tradeRejects);
+        LOG.info(String.format(
+            "venue: rfqs %d  quotes %d  won %d (%.0f%%)  trades %d  rfq rejects %d  trade rejects %d",
+            rfqs, quotes, weWon, decided == 0 ? 0.0 : 100.0 * weWon / decided, trades, rfqRejects, tradeRejects));
         if (rfqToQuote.getTotalCount() > 0)
         {
-            System.out.printf("venue: RFQ -> quote over FIX  p50=%.0fus  p99=%.0fus  max=%.0fus%n",
+            LOG.info(String.format("venue: RFQ -> quote over FIX  p50=%.0fus  p99=%.0fus  max=%.0fus",
                 rfqToQuote.getValueAtPercentile(50) / 1000.0,
                 rfqToQuote.getValueAtPercentile(99) / 1000.0,
-                rfqToQuote.getMaxValue() / 1000.0);
+                rfqToQuote.getMaxValue() / 1000.0));
         }
         if (!rejectReasons.isEmpty())
         {
-            System.out.printf("venue: rejects %s%n", rejectReasons);
+            LOG.info("venue: rejects {}", rejectReasons);
         }
     }
 

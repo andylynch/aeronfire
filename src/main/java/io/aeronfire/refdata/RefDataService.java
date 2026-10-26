@@ -5,6 +5,8 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.aeronfire.control.Users;
 import io.aeronfire.util.Json;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -39,6 +41,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class RefDataService
 {
+    private static final Logger LOG = LoggerFactory.getLogger(RefDataService.class);
+
     private static final Set<String> EDITORS = Set.of("root", "refdata", "compliance");
     private static final Set<String> COMPLIANCE = Set.of("root", "compliance");
 
@@ -89,16 +93,16 @@ public final class RefDataService
             // Fictional AF00* LEIs won't be in GLEIF; real ones (if you swap them in) will.
             final List<Model.LeiRecord> fresh = Sources.gleif(leis);
             store.updateLeis(fresh);
-            System.out.println("GLEIF live: " + fresh.size() + " of " + leis.size() + " LEIs found");
+            LOG.info("GLEIF live: {} of {} LEIs found", fresh.size(), leis.size());
         }
         catch (final Exception ex)
         {
-            System.out.println("GLEIF live unavailable, keeping snapshot: " + ex.getMessage());
+            LOG.warn("GLEIF live unavailable, keeping snapshot: {}", ex.getMessage());
         }
         try
         {
             final List<Model.Designation> live = Sources.ukSanctionsList();
-            System.out.println("UK Sanctions List live: " + live.size() + " names");
+            LOG.info("UK Sanctions List live: {} names", live.size());
             final List<Sources.TimedDesignation> merged = new java.util.ArrayList<>();
             live.forEach((d) -> merged.add(new Sources.TimedDesignation(d, 0)));
             // keep the demo's timed entry so the mid-session update still happens
@@ -107,16 +111,16 @@ public final class RefDataService
         }
         catch (final Exception ex)
         {
-            System.out.println("UK Sanctions List live unavailable, keeping snapshot: " + ex.getMessage());
+            LOG.warn("UK Sanctions List live unavailable, keeping snapshot: {}", ex.getMessage());
         }
         try
         {
             final List<String> files = Sources.firdsFiles("DLTINS", 1);
-            System.out.println("FIRDS latest delta file: " + files);
+            LOG.info("FIRDS latest delta file: {}", files);
         }
         catch (final Exception ex)
         {
-            System.out.println("FIRDS live unavailable, keeping snapshot: " + ex.getMessage());
+            LOG.warn("FIRDS live unavailable, keeping snapshot: {}", ex.getMessage());
         }
     }
 
@@ -142,7 +146,7 @@ public final class RefDataService
             }
             final String result = push(v.clientId(), v.kycValid(), v.sanctioned());
             lastPush = "client " + v.clientId() + " kyc=" + v.kycValid() + " sanctioned=" + v.sanctioned() + ": " + result;
-            System.out.println("eligibility push: " + lastPush + " " + v.reasons());
+            LOG.info("eligibility push: {} {}", lastPush, v.reasons());
             if (result.startsWith("APPLIED") || result.startsWith("PENDING"))
             {
                 // a pending un-sanction needs four-eyes in the cluster; remember we asked so we don't re-queue it
@@ -295,7 +299,7 @@ public final class RefDataService
             service.loadSnapshots();
         }
         service.serve(port, new Users(System.getenv("CONTROL_USERS")));
-        System.out.printf("refdata up (%s): http://localhost:%d/api/state, /clients.tsv, /instruments.tsv%n", mode, port);
+        LOG.info("refdata up ({}): http://localhost:{}/api/state, /clients.tsv, /instruments.tsv", mode, port);
 
         final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
         timer.scheduleWithFixedDelay(() ->
@@ -306,7 +310,7 @@ public final class RefDataService
             }
             catch (final RuntimeException ex)
             {
-                System.out.println("evaluate failed: " + ex);
+                LOG.error("evaluate failed", ex);
             }
         }, 2, intervalS, TimeUnit.SECONDS);
         Thread.currentThread().join();

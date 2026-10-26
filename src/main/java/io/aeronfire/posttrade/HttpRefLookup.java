@@ -2,6 +2,8 @@ package io.aeronfire.posttrade;
 
 import io.aeronfire.refdata.Model;
 import io.aeronfire.refdata.Sources;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -22,6 +24,8 @@ import java.util.Map;
  */
 public final class HttpRefLookup implements RefLookup
 {
+    private static final Logger LOG = LoggerFactory.getLogger(HttpRefLookup.class);
+
     private static final long MAX_AGE_MS = 1_000;
 
     private final HttpClient http = HttpClient.newHttpClient();
@@ -82,7 +86,7 @@ public final class HttpRefLookup implements RefLookup
         {
             if (!warned)
             {
-                System.out.println("reference data service unreachable, using snapshot clients: " + ex.getMessage());
+                LOG.warn("reference data service unreachable, using snapshot clients: {}", ex.getMessage());
                 warned = true;
             }
         }

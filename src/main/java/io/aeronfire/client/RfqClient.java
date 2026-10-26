@@ -25,6 +25,8 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BusySpinIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -39,6 +41,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class RfqClient implements EgressListener
 {
+    private static final Logger LOG = LoggerFactory.getLogger(RfqClient.class);
+
     private static final int NO_RESPONSE = 0;
     private static final int GOT_QUOTE = 1;
     private static final int GOT_TRADE = 2;
@@ -136,7 +140,7 @@ public final class RfqClient implements EgressListener
                 .credentialsSupplier(io.aeronfire.cluster.ClusterAuthenticator.controlCredentialsSupplier(
                     env("CONTROL_SECRET", io.aeronfire.cluster.ClusterAuthenticator.DEFAULT_SECRET)))))
         {
-            System.out.printf("connected, leader member %d%n", cluster.leaderMemberId());
+            LOG.info("connected, leader member {}", cluster.leaderMemberId());
             client.liftThrottle(cluster);
             client.run(cluster, warmup, resetEvery, null, null);
 
@@ -221,7 +225,7 @@ public final class RfqClient implements EgressListener
             .userId(0);
         send(cluster, MessageHeaderEncoder.ENCODED_LENGTH + encoder.encodedLength());
         await(cluster);
-        System.out.println("RTS 6 throttle lifted for the load test");
+        LOG.info("RTS 6 throttle lifted for the load test");
     }
 
     private Histogram offerNs;

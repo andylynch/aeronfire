@@ -31,6 +31,8 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -44,6 +46,8 @@ import java.util.List;
  */
 public final class Monitor implements EgressListener
 {
+    private static final Logger LOG = LoggerFactory.getLogger(Monitor.class);
+
     private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
     private final QuoteDecoder quote = new QuoteDecoder();
     private final TradeDecoder trade = new TradeDecoder();
@@ -182,7 +186,7 @@ public final class Monitor implements EgressListener
             monitor.subscribe(cluster);
             if (web)
             {
-                System.out.printf("blotter at http://localhost:%d%n", httpPort);
+                LOG.info("blotter at http://localhost:{}", httpPort);
             }
             monitor.run(cluster, running, tui ? new TerminalView(new java.io.PrintStream(
                 new java.io.FileOutputStream(java.io.FileDescriptor.out), false, java.nio.charset.StandardCharsets.UTF_8)) : null);

@@ -27,6 +27,8 @@ import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -56,6 +58,8 @@ import java.util.concurrent.TimeUnit;
  */
 public final class ControlPlane
 {
+    private static final Logger LOG = LoggerFactory.getLogger(ControlPlane.class);
+
     private static final long COMMAND_TIMEOUT_MS = 5_000;
 
     /**
@@ -271,7 +275,7 @@ public final class ControlPlane
             control.view.leader(viewSession.leaderMemberId(), -1);
             control.subscribe(viewSession);
             control.registerMBeans(clusterDirs);
-            System.out.printf("control plane up: MBeans under aeronfire:type=*, admin page http://localhost:%d%n", httpPort);
+            LOG.info("control plane up: MBeans under aeronfire:type=*, admin page http://localhost:{}", httpPort);
             control.run(commands, viewSession, running);
         }
         running.closed();
