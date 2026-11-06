@@ -1,9 +1,9 @@
 [versions]
 # Keep Aeron, SBE and Artio in step: each Artio release is built against one Aeron version.
-aeron = "1.53.3"
+aeron = "1.54.0"
 sbe = "1.41.0"
 # Artio 0.186 is built against Aeron 1.53.3 / Agrona 2.6.1.
-artio = "0.186"
+artio = "0.187"
 hdrhistogram = "2.2.2"
 jolokia = "2.6.4"
 junit = "6.1.3"
