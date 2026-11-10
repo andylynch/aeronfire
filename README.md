@@ -70,6 +70,12 @@ Run locally (3 members, gateway and venue on one 2-core box):
 Latency numbers from that box aren't meaningful (six JVMs sharing two cores); use
 `scripts/bench-local.sh` on isolated cores for those.
 
+Every JVM runs the Jolokia agent (no auth, demo only), so JMX (heap, GC, threads and the `aeronfire:type=*`
+MBeans) is one `curl` away: control :8778, posttrade :8779, node0-2 :8780-8782, gateway :8783, monitor :8784,
+refdata :8785, tui :8786, venue :8787, client :8788. The Gradle `run*` tasks use the same ports on localhost.
+
+    curl localhost:8780/jolokia/read/java.lang:type=Memory/HeapMemoryUsage
+
 ### Control plane and entitlements
 
 `control` (admin page :8090, MBeans under `aeronfire:type=*`, Jolokia :8778) is the only way to change

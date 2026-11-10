@@ -3,7 +3,9 @@
 #   docker compose run --rm venue            # Tradeweb-style venue over FIX
 #   docker compose run --rm tui              # terminal blotter
 #   control plane: http://localhost:8090 (users root/risk/ops/deskhead/compliance/sales, password = name)
-#                  Jolokia on :8778
+#   Jolokia (no auth) on every JVM: control :8778, posttrade :8779, node0-2 :8780-8782,
+#                  gateway :8783, monitor :8784, refdata :8785, tui :8786, venue :8787, client :8788
+#                  (run-only services publish theirs with docker compose run --service-ports)
 #   docker compose run --rm client           # raw cluster load test (no FIX)
 #   docker compose kill <leader>             # watch a new leader take over
 x-node: &node
@@ -23,6 +25,9 @@ services:
     environment:
       <<: *node-env
       NODE_ID: "0"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8780,host=0.0.0.0
+    ports:
+      - "8780:8780"
 
   node1:
     <<: *node
@@ -30,6 +35,9 @@ services:
     environment:
       <<: *node-env
       NODE_ID: "1"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8781,host=0.0.0.0
+    ports:
+      - "8781:8781"
 
   node2:
     <<: *node
@@ -37,6 +45,9 @@ services:
     environment:
       <<: *node-env
       NODE_ID: "2"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8782,host=0.0.0.0
+    ports:
+      - "8782:8782"
 
   gateway:
     image: aeronfire:local
@@ -49,8 +60,10 @@ services:
       EGRESS_HOST: gateway
       FIX_PORT: "9880"
       WORK_DIR: /tmp
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8783,host=0.0.0.0
     ports:
       - "9880:9880"
+      - "8783:8783"
     depends_on: [node0, node1, node2]
 
   monitor:
@@ -64,8 +77,10 @@ services:
       EGRESS_HOST: monitor
       UI: web
       HTTP_PORT: "8080"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8784,host=0.0.0.0
     ports:
       - "8080:8080"
+      - "8784:8784"
     depends_on: [node0, node1, node2]
 
   control:
@@ -79,8 +94,8 @@ services:
       EGRESS_HOST: control
       CONTROL_SECRET: ${CONTROL_SECRET:-dev-control-secret}
       ADMIN_HTTP_PORT: "8090"
-      # Jolokia: JMX as JSON over HTTP, e.g. curl -u jolokia:jolokia localhost:8778/jolokia/read/aeronfire:type=Credit
-      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8778,host=0.0.0.0,user=jolokia,password=jolokia
+      # Jolokia: JMX as JSON over HTTP, e.g. curl localhost:8778/jolokia/read/aeronfire:type=Credit
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8778,host=0.0.0.0
     ports:
       - "8090:8090"
       - "8778:8778"
@@ -95,8 +110,10 @@ services:
       REFDATA_MODE: ${REFDATA_MODE:-snapshot}
       CONTROL_URL: http://control:8090
       REFDATA_HTTP_PORT: "8095"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8785,host=0.0.0.0
     ports:
       - "8095:8095"
+      - "8785:8785"
     depends_on: [control]
 
   posttrade:
@@ -111,7 +128,7 @@ services:
       REFDATA_URL: http://refdata:8095
       DATA_DIR: /data
       POSTTRADE_HTTP_PORT: "8096"
-      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8779,host=0.0.0.0,user=jolokia,password=jolokia
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8779,host=0.0.0.0
     volumes:
       - posttrade-data:/data
     ports:
@@ -132,6 +149,9 @@ services:
       PORT_BASE: "9000"
       EGRESS_HOST: tui
       UI: tui
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8786,host=0.0.0.0
+    ports:
+      - "8786:8786"
     depends_on: [node0, node1, node2]
 
   venue:
@@ -146,6 +166,9 @@ services:
       RFQ_RATE: "50"
       DURATION_SECONDS: "60"
       WORK_DIR: /tmp
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8787,host=0.0.0.0
+    ports:
+      - "8787:8787"
     depends_on: [gateway]
 
   client:
@@ -161,6 +184,9 @@ services:
       CONTROL_SECRET: ${CONTROL_SECRET:-dev-control-secret}
       RFQ_COUNT: "20000"
       WARMUP_COUNT: "5000"
+      JAVA_OPTS: -javaagent:/app/agent/jolokia-agent.jar=port=8788,host=0.0.0.0
+    ports:
+      - "8788:8788"
     depends_on: [node0, node1, node2]
 
 volumes:

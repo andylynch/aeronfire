@@ -143,7 +143,7 @@ distributions {
     main {
         contents {
             extraStartScripts.forEach { from(it) { into("bin") } }
-            // Jolokia JVM agent, attached to the control plane with -javaagent (see docker-compose.yml).
+            // Jolokia JVM agent, attached to every process with -javaagent (see docker-compose.yml for the ports).
             from(jolokiaAgent) {
                 into("agent")
                 rename { "jolokia-agent.jar" }
@@ -152,12 +152,18 @@ distributions {
     }
 }
 
+// Attaches the Jolokia agent on localhost:port. Ports match docker-compose.yml so local and container runs line up.
+fun JavaExec.jolokia(port: Int) = jvmArgumentProviders.add(CommandLineArgumentProvider {
+    listOf("-javaagent:${jolokiaAgent.singleFile.absolutePath}=port=$port,host=localhost")
+})
+
 tasks.register<JavaExec>("runGateway") {
     description = "Runs the FIX gateway against a local 3-node cluster."
     group = "application"
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.gateway.FixGateway"
     jvmArgs(aeronJvmArgs)
+    jolokia(8783)
 }
 
 tasks.register<JavaExec>("runVenue") {
@@ -166,6 +172,7 @@ tasks.register<JavaExec>("runVenue") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.venue.VenueSimulator"
     jvmArgs(aeronJvmArgs)
+    jolokia(8787)
 }
 
 tasks.register<JavaExec>("runMonitor") {
@@ -174,6 +181,7 @@ tasks.register<JavaExec>("runMonitor") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.monitor.Monitor"
     jvmArgs(aeronJvmArgs)
+    jolokia(8784)
     standardInput = System.`in`
 }
 
@@ -183,9 +191,7 @@ tasks.register<JavaExec>("runControl") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.control.ControlPlane"
     jvmArgs(aeronJvmArgs)
-    jvmArgumentProviders.add(CommandLineArgumentProvider {
-        listOf("-javaagent:${jolokiaAgent.singleFile.absolutePath}=port=8778,host=localhost")
-    })
+    jolokia(8778)
 }
 
 tasks.register<JavaExec>("runRefData") {
@@ -194,6 +200,7 @@ tasks.register<JavaExec>("runRefData") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.refdata.RefDataService"
     jvmArgs(aeronJvmArgs)
+    jolokia(8785)
 }
 
 tasks.register<JavaExec>("runPostTrade") {
@@ -202,6 +209,7 @@ tasks.register<JavaExec>("runPostTrade") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.posttrade.PostTradeService"
     jvmArgs(aeronJvmArgs)
+    jolokia(8779)
 }
 
 tasks.register<JavaExec>("jmh") {
@@ -230,6 +238,7 @@ tasks.register<JavaExec>("runClient") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass = "io.aeronfire.client.RfqClient"
     jvmArgs(aeronJvmArgs)
+    jolokia(8788)
 }
 
 tasks.test {
