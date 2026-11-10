@@ -6,10 +6,13 @@
 #                  Jolokia on :8778
 #   docker compose run --rm client           # raw cluster load test (no FIX)
 #   docker compose kill <leader>             # watch a new leader take over
+#   docker compose --profile demo up -d      # + live venue and the demo panel (http://localhost:8100, user demo)
+#                                            #   set DEMO_PASSWORD; see README "Demo panel" before exposing it
 x-node: &node
   build: .
   image: aeronfire:local
   shm_size: 1g
+  cap_add: [NET_ADMIN]   # lets the demo panel add delay and loss to a member's network with tc
   environment: &node-env
     CLUSTER_HOSTS: node0,node1,node2
     PORT_BASE: "9000"
@@ -118,6 +121,49 @@ services:
       - "8096:8096"
       - "8779:8779"
     depends_on: [node0, node1, node2, refdata]
+
+  # ---- demo profile: always-on venue and the demo panel ---------------------------------------------------
+  venue-live:
+    image: aeronfire:local
+    profiles: [demo]
+    hostname: venue-live
+    shm_size: 512m
+    entrypoint: ["/app/bin/venue-sim"]
+    restart: unless-stopped
+    environment:
+      GATEWAY_HOST: gateway
+      FIX_PORT: "9880"
+      RFQ_RATE: ${DEMO_DEFAULT_RPS:-20}
+      DURATION_SECONDS: "0"
+      VENUE_CONTROL_PORT: "8099"      # the panel changes the rate and reads latency here; never publish it
+      VENUE_MAX_RATE: ${DEMO_MAX_RPS:-200}
+      WORK_DIR: /tmp
+    depends_on: [gateway]
+
+  demo:
+    # No hostname on purpose: the panel finds its own compose project from its container id (the default hostname).
+    image: aeronfire:local
+    profiles: [demo]
+    shm_size: 64m
+    entrypoint: ["/app/bin/demo"]
+    restart: unless-stopped
+    environment:
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-}          # blank: a random one is generated and printed in `docker compose logs demo`
+      MONITOR_URL: http://monitor:8080
+      VENUE_URL: http://venue-live:8099
+      CONTROL_URL: http://control:8090
+      CONTROL_USERS: ${CONTROL_USERS:-}
+      DEMO_BLOTTER_URL: ${DEMO_BLOTTER_URL:-}
+      DEMO_DEFAULT_RPS: ${DEMO_DEFAULT_RPS:-20}
+      DEMO_MAX_RPS: ${DEMO_MAX_RPS:-200}
+      DEMO_AUTO_HEAL_S: ${DEMO_AUTO_HEAL_S:-60}      # 0 turns off; for a presenter who wants a long outage
+      DEMO_AUTO_REVERT_S: ${DEMO_AUTO_REVERT_S:-120}
+    volumes:
+      # Full control of the Docker host to anything that gets code execution in this container. See README.
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${DEMO_BIND:-127.0.0.1}:8100:8100"
+    depends_on: [monitor, control, venue-live]
 
   tui:
     image: aeronfire:local

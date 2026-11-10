@@ -1,0 +1,18 @@
+# Publish only the demo panel, and keep every other port on loopback.
+#
+#   DEMO_PASSWORD=... docker compose -f docker-compose.yml -f deploy/demo-lockdown.yml --profile demo up -d --build
+#
+# The base compose file publishes the control plane (password = user name), Jolokia (jolokia/jolokia) and the
+# FIX port on all interfaces, which is fine on a laptop and not on a machine that is reachable from outside.
+# `!override` replaces the list instead of adding to it (Docker Compose 2.24 or newer).
+services:
+  gateway:
+    ports: !override ["127.0.0.1:9880:9880"]
+  monitor:
+    ports: !override ["127.0.0.1:8080:8080"]
+  control:
+    ports: !override ["127.0.0.1:8090:8090", "127.0.0.1:8778:8778"]
+  refdata:
+    ports: !override ["127.0.0.1:8095:8095"]
+  posttrade:
+    ports: !override ["127.0.0.1:8096:8096", "127.0.0.1:8779:8779"]

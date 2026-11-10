@@ -147,6 +147,47 @@ docker compose down
 Any FIX 4.4 initiator can connect as `SenderCompID=TWSIM`, `TargetCompID=AERONFIRE`; the dictionary is
 `src/main/resources/fix/aeronfire-fix44.xml`.
 
+### Demo panel (break it and watch it hold)
+
+A page for showing the system to people: trigger faults and risk events, change the load, and read what
+happened on a timeline that measures the recovery. Self-serve: visitors can click around, and everything
+puts itself back.
+
+```bash
+DEMO_PASSWORD=choose-one docker compose \
+  -f docker-compose.yml -f deploy/demo-lockdown.yml --profile demo up -d --build
+# http://localhost:8100   user: demo
+```
+
+| Panel | What it does | How |
+|---|---|---|
+| Cluster | Crash, stop, freeze, restart a member; add delay, jitter, loss to its network; wipe its disk so it rejoins from nothing | Docker Engine API (`kill`, `stop`, `pause`, `restart`, `tc netem` inside the member, wipe marker plus restart) |
+| Risk controls | Credit breach, halt a loan, sanctions hit, kill switch (four-eyes release), throttle, tight price collar | Control plane API as named users, so entitlements, approvals and the audit trail apply |
+| Load | RFQ rate 0 to 200/s, with live RFQ-to-quote p50, p99, p99.9 and max | Venue simulator's control port; HdrHistogram over the last few seconds |
+| Timeline | "New leader elected in 1.4s", "trading resumed", "CREDIT_LIMIT enforced 0.3s after the change" | Panel times the monitor's feed against each action |
+
+Safety, since strangers will press the buttons:
+
+- Password gate (`DEMO_PASSWORD`, constant-time compare; a random one is printed in the logs if unset), a
+  rate limit of one change a second, and a required `X-Demo-Request` header so another site can't make a
+  logged-in browser post to it.
+- Allowlists, not a shell: only the configured member services, a fixed set of operations, range-checked
+  numbers, fixed command templates inside containers.
+- Auto-heal: a member down or frozen for `DEMO_AUTO_HEAL_S` (60s) is started again, a network fault is
+  cleared after the same time, and any risk scenario switches itself off after `DEMO_AUTO_REVERT_S` (120s).
+  "Reset everything" does it all now. Set `DEMO_AUTO_HEAL_S=0` to hold an outage for a presenter.
+- **The panel mounts the Docker socket, which is root on the host if the panel is ever compromised.** Run it
+  on a machine you don't mind that for, publish only port 8100 (`deploy/demo-lockdown.yml` rebinds the rest
+  to loopback), and prefer a private link. For the public internet, put Cloudflare Access (or similar) in
+  front as well as the password, or put a socket proxy that only allows `kill/start/stop/pause/restart/exec`
+  between the panel and Docker.
+- Losing two of three members stops the cluster by design (no quorum); the panel says so, and auto-heal
+  brings it back.
+
+Without a Docker socket the panel still works for risk controls and load; the node buttons are disabled.
+The venue's control port (8099) and the panel's settings are environment variables listed in
+`docker-compose.yml` (`DEMO_*`).
+
 ### Bare metal (latency numbers)
 
 ```bash
@@ -244,3 +285,4 @@ JDK 25 and Gradle (via the wrapper). The build passes the flags Aeron/Agrona nee
 - [x] Risk egress: the cluster computes CS01 and DV01 (and mark) after every trade and position adjustment and pushes `RiskUpdate` to monitors, with book totals; the blotter shows them. One bond per issuer here, so by-issuer equals by-instrument; with this single-curve pricer DV01 equals CS01 numerically.
 - [x] Latency report: HdrHistogram per hop, ZGC vs G1, bare metal vs cloud (`scripts/latency-report.sh`).
 - [x] JMH benchmarks for the pricer and codecs (`./gradlew jmh`).
+- [x] Demo panel: self-serve fault injection (crash, freeze, network, wipe), risk scenarios, load and live latency, with measured recovery on a timeline.

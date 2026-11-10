@@ -125,6 +125,7 @@ val launchers = mapOf(
     "refdata" to "io.aeronfire.refdata.RefDataService",
     "posttrade" to "io.aeronfire.posttrade.PostTradeService",
     "risk-as-of" to "io.aeronfire.tools.RiskAsOf",
+    "demo" to "io.aeronfire.demo.DemoPanel",
 )
 
 val extraStartScripts = launchers.map { (name, main) ->

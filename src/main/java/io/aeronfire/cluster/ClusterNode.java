@@ -42,6 +42,7 @@ public final class ClusterNode
         config.aeronArchiveContext().errorHandler(errorHandler(nodeId, "archive client"));
         config.consensusModuleContext().errorHandler(errorHandler(nodeId, "consensus module"));
         config.clusteredServiceContext().errorHandler(errorHandler(nodeId, "service"));
+        wipeIfRequested(nodeId, config);
         final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
         try (ClusteredMediaDriver ignoredDriver = ClusteredMediaDriver.launch(
@@ -53,6 +54,38 @@ public final class ClusterNode
             startLatencyReporter(nodeId, service.timings());
             barrier.await();
             System.out.printf("aeronfire node %d shutting down%n", nodeId);
+        }
+    }
+
+    /**
+     * Demo hook: if the marker file exists, delete this member's Aeron, archive and cluster state before starting,
+     * so the member rejoins as if it were a brand-new machine and catches up from the leader. The demo panel
+     * drops the marker with a fixed command, kills the member and starts it again. Off unless the file is there.
+     */
+    private static void wipeIfRequested(final int nodeId, final ClusterConfig config)
+    {
+        final java.io.File marker = new java.io.File(env("WIPE_MARKER", "/tmp/aeronfire-wipe"));
+        if (!marker.exists())
+        {
+            return;
+        }
+        System.out.printf("aeronfire node %d: wipe marker found, deleting local cluster state%n", nodeId);
+        final String aeronDir = config.mediaDriverContext().aeronDirectoryName();
+        deleteTree(null == aeronDir ? null : new java.io.File(aeronDir));
+        deleteTree(config.archiveContext().archiveDir());
+        deleteTree(config.consensusModuleContext().clusterDir());
+        deleteTree(config.clusteredServiceContext().clusterDir());
+        if (!marker.delete())
+        {
+            System.err.printf("aeronfire node %d: could not delete %s%n", nodeId, marker);
+        }
+    }
+
+    private static void deleteTree(final java.io.File directory)
+    {
+        if (null != directory && directory.exists())
+        {
+            org.agrona.IoUtil.delete(directory, true);
         }
     }
 
