@@ -64,6 +64,8 @@ public final class VenueSimulator
     private final MutableAsciiBuffer asciiBuffer = new MutableAsciiBuffer();
     private final Object2LongHashMap<String> sentAtNs = new Object2LongHashMap<>(-1L);
     private final Histogram rfqToQuote = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
+    /** Last few seconds only, so the demo panel shows what latency is doing now, not since start-up. */
+    private final Histogram window = new Histogram(TimeUnit.SECONDS.toNanos(10), 3);
     private final SplittableRandom random;
     private final int competingDealers;
     private final double compNoisePoints;
@@ -106,12 +108,13 @@ public final class VenueSimulator
 
         try (ArtioRuntime artio = ArtioRuntime.launch("venue", workDir, (configuration) -> { });
              FixLibrary library = artio.connectLibrary(new LibraryConfiguration()
-                .sessionAcquireHandler((session, info) -> venue.handler())))
+                .sessionAcquireHandler((session, info) -> venue.handler()));
+             VenueControl control = VenueControl.startIfConfigured(rfqsPerSecond))
         {
             venue.session = venue.connect(library, gatewayHost, gatewayPort);
             LOG.info("venue connected to {}:{} as {}, {} RFQs/s",
                 gatewayHost, gatewayPort, VENUE_COMP_ID, rfqsPerSecond);
-            venue.run(library, running, rfqsPerSecond, durationSeconds);
+            venue.run(library, running, rfqsPerSecond, durationSeconds, control);
             venue.printStats();
         }
         running.closed();
@@ -158,29 +161,54 @@ public final class VenueSimulator
     }
 
     private void run(
-        final FixLibrary library, final ShutdownFlag running, final int rfqsPerSecond, final long durationSeconds)
+        final FixLibrary library,
+        final ShutdownFlag running,
+        final int rfqsPerSecond,
+        final long durationSeconds,
+        final VenueControl control)
     {
         final IdleStrategy idle = new BackoffIdleStrategy();
-        final long intervalNs = TimeUnit.SECONDS.toNanos(1) / Math.max(1, rfqsPerSecond);
         final long endNs = durationSeconds > 0 ? System.nanoTime() + TimeUnit.SECONDS.toNanos(durationSeconds) : Long.MAX_VALUE;
         long nextRfqNs = System.nanoTime();
         long nextStatsNs = nextRfqNs + TimeUnit.SECONDS.toNanos(5);
+        long nextPublishNs = nextRfqNs + TimeUnit.SECONDS.toNanos(1);
+        long windowStartNs = nextRfqNs;
 
         while (running.isRunning() && System.nanoTime() < endNs && session.isActive())
         {
             int work = library.poll(10);
 
             final long now = System.nanoTime();
-            if (now >= nextRfqNs)
+            // The demo panel can change the rate at runtime; 0 pauses the flow.
+            final int rate = null == control ? rfqsPerSecond : control.rate();
+            if (rate > 0 && now >= nextRfqNs)
             {
                 sendRfq();
-                nextRfqNs += intervalNs;
+                if (now - nextRfqNs > TimeUnit.SECONDS.toNanos(1))
+                {
+                    nextRfqNs = now; // don't burst to catch up after a stall or a rate change
+                }
+                nextRfqNs += TimeUnit.SECONDS.toNanos(1) / rate;
                 work++;
+            }
+            else if (rate == 0)
+            {
+                nextRfqNs = now;
             }
             if (now >= nextStatsNs)
             {
                 printStats();
                 nextStatsNs += TimeUnit.SECONDS.toNanos(5);
+            }
+            if (null != control && now >= nextPublishNs)
+            {
+                control.publish(statsJson());
+                nextPublishNs += TimeUnit.SECONDS.toNanos(1);
+                if (now - windowStartNs >= TimeUnit.SECONDS.toNanos(5))
+                {
+                    window.reset();
+                    windowStartNs = now;
+                }
             }
 
             idle.idle(work);
@@ -290,7 +318,9 @@ public final class VenueSimulator
         final long sentNs = sentAtNs.removeKey(quoteReqId);
         if (sentNs > 0)
         {
-            rfqToQuote.recordValue(Math.min(System.nanoTime() - sentNs, rfqToQuote.getHighestTrackableValue()));
+            final long elapsedNs = Math.min(System.nanoTime() - sentNs, rfqToQuote.getHighestTrackableValue());
+            rfqToQuote.recordValue(elapsedNs);
+            window.recordValue(elapsedNs);
         }
 
         // Comp: other dealers price around us. The client buys at the lowest offer, sells at the highest bid.
@@ -372,6 +402,38 @@ public final class VenueSimulator
         {
             LOG.info("venue: rejects {}", rejectReasons);
         }
+    }
+
+    /**
+     * Stats for the demo panel, built on the loop thread (the histograms are not thread-safe).
+     */
+    private String statsJson()
+    {
+        final StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"rfqs\":").append(rfqs)
+            .append(",\"quotes\":").append(quotes)
+            .append(",\"trades\":").append(trades)
+            .append(",\"rfqRejects\":").append(rfqRejects)
+            .append(",\"tradeRejects\":").append(tradeRejects)
+            .append(",\"recent\":").append(histogramJson(window))
+            .append(",\"total\":").append(histogramJson(rfqToQuote))
+            .append('}');
+        return sb.toString();
+    }
+
+    private static String histogramJson(final Histogram histogram)
+    {
+        if (histogram.getTotalCount() == 0)
+        {
+            return "{\"count\":0}";
+        }
+        return String.format(java.util.Locale.ROOT,
+            "{\"count\":%d,\"p50us\":%.0f,\"p99us\":%.0f,\"p999us\":%.0f,\"maxus\":%.0f}",
+            histogram.getTotalCount(),
+            histogram.getValueAtPercentile(50) / 1000.0,
+            histogram.getValueAtPercentile(99) / 1000.0,
+            histogram.getValueAtPercentile(99.9) / 1000.0,
+            histogram.getMaxValue() / 1000.0);
     }
 
     private static String env(final String name, final String defaultValue)
