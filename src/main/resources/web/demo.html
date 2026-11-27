@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aeronfire live demo</title>
+<style>
+  :root {
+    --bg: #0b0e13; --panel: #121721; --line: #1f2633; --text: #d7dde8; --muted: #7d8799;
+    --buy: #3ecf8e; --sell: #ff6b6b; --warn: #f2b84b; --accent: #6ea8ff; --violet: #b08cff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: .04em; }
+  header .sub { color: var(--muted); }
+  header .right { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .pill { font-family: var(--mono); font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); }
+  .pill.ok { color: var(--buy); border-color: #1d4d39; } .pill.bad { color: var(--sell); border-color: #5a2323; } .pill.warn { color: var(--warn); border-color: #5a4515; }
+  a { color: var(--accent); text-decoration: none; }
+  button { font: inherit; color: var(--text); background: #1a2231; border: 1px solid #2a3447; border-radius: 6px; padding: 5px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.danger:hover:not(:disabled) { border-color: var(--sell); color: var(--sell); }
+  button.primary { background: #1c3358; border-color: #2e5aa0; }
+  button.go { background: #173b2c; border-color: #25684b; }
+  main { display: grid; gap: 14px; padding: 16px 20px; grid-template-columns: repeat(12, 1fr); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+  section h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+  section h2 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .kpis { grid-column: span 12; display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; background: none; border: 0; padding: 0; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  .kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .kpi .value { font-family: var(--mono); font-size: 22px; margin-top: 2px; }
+  .kpi .rate { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+  .cluster { grid-column: span 12; }
+  .nodes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .node { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #0f141d; }
+  .node.leader { border-color: #2e5aa0; box-shadow: 0 0 0 1px #2e5aa033, 0 0 18px #2e5aa022; }
+  .node.down { border-color: #5a2323; } .node.frozen { border-color: #5a4515; }
+  .node .top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .node .name { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .badge { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.leader { color: var(--accent); border-color: #2e5aa0; } .badge.follower { color: var(--buy); border-color: #1d4d39; }
+  .badge.down { color: var(--sell); border-color: #5a2323; } .badge.frozen { color: var(--warn); border-color: #5a4515; }
+  .node .meta { color: var(--muted); font-family: var(--mono); font-size: 11px; min-height: 16px; }
+  .node .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .node details { margin-top: 8px; }
+  .node summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .netem { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+  .netem input { width: 62px; background: #0b0e13; color: var(--text); border: 1px solid #2a3447; border-radius: 5px; padding: 3px 6px; font-family: var(--mono); }
+  .netem label { color: var(--muted); font-size: 11px; }
+  .warnbar { margin-top: 10px; padding: 8px 12px; border-radius: 6px; background: #3a2e14; color: var(--warn); display: none; }
+  .scen { grid-column: span 7; } .load { grid-column: span 5; }
+  .scenarios { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .sc { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #0f141d; display: flex; flex-direction: column; gap: 6px; }
+  .sc.on { border-color: #7a5a14; background: #1a1608; }
+  .sc .title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .sc .story { color: var(--muted); font-size: 12px; flex: 1; }
+  .sc .foot { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .sc .foot .count { color: var(--warn); }
+  .loadrow { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 10px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .lat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+  .lat div { background: #0f141d; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  .lat .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .lat .v { font-family: var(--mono); font-size: 16px; }
+  svg.spark { width: 100%; height: 56px; display: block; }
+  .timeline { grid-column: span 7; } .flow { grid-column: span 5; }
+  .tl { max-height: 330px; overflow: auto; font-size: 12px; }
+  .tl .row { display: grid; grid-template-columns: 64px 70px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid #161c27; }
+  .tl .time { color: var(--muted); font-family: var(--mono); } .tl .kind { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
+  .k-fault { color: var(--sell); } .k-heal { color: var(--buy); } .k-scenario { color: var(--warn); } .k-measure { color: var(--violet); }
+  .k-warn { color: var(--warn); } .k-error { color: var(--sell); } .k-load { color: var(--accent); } .k-info { color: var(--muted); }
+  .row.measure .text { color: #e6dcff; font-weight: 600; }
+  .reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .chip { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #3a2e14; color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 3px 5px; border-bottom: 1px solid var(--line); }
+  td { padding: 3px 5px; border-bottom: 1px solid #161c27; white-space: nowrap; }
+  .t-QUOTE { color: var(--accent); } .t-TRADE { color: var(--buy); } .t-REJECT { color: var(--sell); }
+  .buy { color: var(--buy); } .sell { color: var(--sell); } .muted { color: var(--muted); }
+  .tour { grid-column: span 12; }
+  .tour ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 28px; color: var(--muted); }
+  .tour li { margin-bottom: 6px; break-inside: avoid; } .tour b { color: var(--text); }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1c2536; border: 1px solid #2e3b54; padding: 8px 16px; border-radius: 8px; display: none; z-index: 5; }
+  #toast.err { border-color: #7a2d2d; color: #ffb3b3; }
+  @media (max-width: 980px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); } .nodes, .scenarios { grid-template-columns: 1fr; }
+    .scen, .load, .timeline, .flow { grid-column: span 12; } .tour ol { columns: 1; } main { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>aeronfire</h1><span class="sub">live demo: break it and watch it hold</span>
+  <div class="right">
+    <span class="pill" id="p-cluster">connecting…</span>
+    <span class="pill" id="p-quorum"></span>
+    <a id="blotter" href="#" target="_blank" rel="noopener" style="display:none">full blotter ↗</a>
+    <button class="primary" id="reset" title="Undo every scenario, restart anything down, clear network faults, restore load">Reset everything</button>
+  </div>
+</header>
+
+<main>
+  <section class="kpis">
+    <div class="kpi"><div class="label">Trades / s</div><div class="value" id="k-tps">–</div><div class="rate" id="k-trades"></div></div>
+    <div class="kpi"><div class="label">Quotes / s</div><div class="value" id="k-qps">–</div><div class="rate" id="k-quotes"></div></div>
+    <div class="kpi"><div class="label">Hit ratio</div><div class="value" id="k-hit">–</div><div class="rate">we win when best price</div></div>
+    <div class="kpi"><div class="label">Rejects</div><div class="value" id="k-rej">–</div><div class="rate" id="k-notional"></div></div>
+    <div class="kpi"><div class="label">RFQ → quote p99</div><div class="value" id="k-p99">–</div><div class="rate" id="k-p50"></div></div>
+    <div class="kpi"><div class="label">Leader changes</div><div class="value" id="k-fo">–</div><div class="rate" id="k-term"></div></div>
+  </section>
+
+  <section class="cluster">
+    <h2>Cluster <span class="hint">three members, Raft consensus. Hit them.</span></h2>
+    <div class="nodes" id="nodes"></div>
+    <div class="warnbar" id="quorumwarn">Quorum lost. The cluster stops accepting trades on purpose rather than risk two members disagreeing. Nothing is lost: bring a member back.</div>
+    <div class="muted" id="docker-off" style="display:none;margin-top:8px">Docker is not reachable from the panel, so infrastructure faults are disabled. Risk controls and load still work.</div>
+  </section>
+
+  <section class="scen">
+    <h2>Risk controls <span class="hint">real changes through the control plane, with entitlements and four-eyes</span></h2>
+    <div class="scenarios" id="scenarios"></div>
+  </section>
+
+  <section class="load">
+    <h2>Load and latency <span class="hint">RFQ to firm quote, measured over FIX</span></h2>
+    <div class="muted">RFQ rate: <b id="rate-val" style="color:var(--text)">–</b> / s</div>
+    <input type="range" id="rate" min="0" max="200" value="20">
+    <div class="loadrow">
+      <button data-rps="0">Pause</button><button data-rps="5">Quiet 5</button><button data-rps="20">Normal 20</button>
+      <button data-rps="100">Busy 100</button><button data-rps="200">Burst 200</button>
+    </div>
+    <div class="lat">
+      <div><div class="k">p50</div><div class="v" id="l-p50">–</div></div>
+      <div><div class="k">p99</div><div class="v" id="l-p99">–</div></div>
+      <div><div class="k">p99.9</div><div class="v" id="l-p999">–</div></div>
+      <div><div class="k">max</div><div class="v" id="l-max">–</div></div>
+    </div>
+    <svg class="spark" id="spark" viewBox="0 0 300 56" preserveAspectRatio="none"></svg>
+    <div class="muted" style="font-size:11px">p99 over the last minute (grey: trades/s)</div>
+  </section>
+
+  <section class="timeline">
+    <h2>Timeline <span class="hint">what we did, and what the system did about it</span></h2>
+    <div class="tl" id="tl"></div>
+  </section>
+
+  <section class="flow">
+    <h2>Flow <span class="hint">rejects by reason, latest events</span></h2>
+    <div class="reasons" id="reasons"></div>
+    <table><thead><tr><th>time</th><th>type</th><th>cl</th><th>loan</th><th>side</th><th>mm</th><th>detail</th></tr></thead><tbody id="recent"></tbody></table>
+  </section>
+
+  <section class="tour">
+    <h2>Five-minute tour</h2>
+    <ol>
+      <li><b>Watch it run.</b> Trades and quotes flow; every RFQ gets a firm price in under a few milliseconds.</li>
+      <li><b>Crash the leader.</b> Press Crash on the LEADER. Read the timeline: new leader elected, trading resumed, trade count carries on.</li>
+      <li><b>Bring it back.</b> Start the dead member: it rejoins from its own log and catches up.</li>
+      <li><b>Wipe a follower.</b> It restarts with no state at all and rebuilds from the leader.</li>
+      <li><b>Credit breach, then the kill switch.</b> Watch the reject reasons appear. Undo the kill switch: a second user approves it (four-eyes).</li>
+      <li><b>Burst the load.</b> Take the rate to 200/s, then add 50ms delay to a follower and see what consensus costs.</li>
+    </ol>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtUs = (us) => us == null ? '–' : us >= 1000 ? (us / 1000).toFixed(1) + ' ms' : Math.round(us) + ' µs';
+const fmtN = (n) => n == null ? '–' : Number(n).toLocaleString();
+const clock = (ms) => new Date(ms).toLocaleTimeString([], {hour12: false});
+let busy = false, last = null, lastRecent = {}, p99Hist = [], tpsHist = [], scenBase = {}, sliderDrag = false;
+
+async function post(url, params) {
+  if (busy) return;
+  busy = true; document.body.style.cursor = 'progress';
+  try {
+    const r = await fetch(url, {method: 'POST', headers: {'X-Demo-Request': '1', 'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams(params)});
+    const j = await r.json();
+    toast(j.message, !j.ok);
+  } catch (e) { toast('Request failed: ' + e, true); }
+  busy = false; document.body.style.cursor = ''; refresh();
+}
+function toast(msg, err) {
+  const t = $('toast'); t.textContent = msg; t.className = err ? 'err' : ''; t.style.display = 'block';
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 3500);
+}
+const fault = (node, op, extra) => post('/api/fault', Object.assign({node, op}, extra || {}));
+
+function renderNodes(s) {
+  const dockerOn = s.dockerUp;
+  $('docker-off').style.display = dockerOn ? 'none' : 'block';
+  $('nodes').innerHTML = s.nodes.map((n) => {
+    const frozen = n.state === 'paused';
+    const role = frozen ? 'frozen' : n.role;
+    const up = n.state === 'running', dis = dockerOn ? '' : 'disabled';
+    const age = n.stateSinceMs ? Math.max(0, Math.round((s.now - n.stateSinceMs) / 1000)) + 's in this state' : '';
+    const heal = (!up && s.autoHealS && n.stateSinceMs) ? ' · auto-heal in ' + Math.max(0, s.autoHealS - Math.round((s.now - n.stateSinceMs) / 1000)) + 's' : '';
+    return `<div class="node ${role}">
+      <div class="top"><span class="name">${esc(n.service)}</span><span class="badge ${role}">${role}</span></div>
+      <div class="meta">${esc(n.status)} ${age ? '· ' + age : ''}${heal}</div>
+      <div class="meta" style="color:var(--warn)">${n.netem ? 'network: ' + esc(n.netem) : ''}</div>
+      <div class="actions">
+        <button class="danger" ${dis} ${up || frozen ? '' : 'disabled'} onclick="fault('${n.service}','kill')" title="SIGKILL: a hard crash">Crash</button>
+        <button ${dis} ${up ? '' : 'disabled'} onclick="fault('${n.service}','stop')" title="Graceful stop">Stop</button>
+        ${frozen
+          ? `<button class="go" ${dis} onclick="fault('${n.service}','unpause')">Resume</button>`
+          : `<button ${dis} ${up ? '' : 'disabled'} onclick="fault('${n.service}','pause')" title="Freeze the process: a long GC pause or VM stall">Freeze</button>`}
+        <button ${dis} ${up || frozen ? '' : 'disabled'} onclick="fault('${n.service}','restart')">Restart</button>
+        <button class="danger" ${dis} ${up ? '' : 'disabled'} onclick="if(confirm('Wipe ${n.service}? It will restart with no state and rebuild from the leader.'))fault('${n.service}','wipe')" title="Crash and delete its log and snapshots">Wipe</button>
+        ${(!up && !frozen) ? `<button class="go" ${dis} onclick="fault('${n.service}','start')">Start</button>` : ''}
+      </div>
+      <details><summary>Network faults</summary>
+        <div class="netem">
+          <label>delay ms <input id="d${n.id}" type="number" min="0" max="500" value="50"></label>
+          <label>jitter <input id="j${n.id}" type="number" min="0" max="200" value="10"></label>
+          <label>loss % <input id="l${n.id}" type="number" min="0" max="30" value="0"></label>
+        </div>
+        <div class="actions"><button ${dis} ${up ? '' : 'disabled'} onclick="fault('${n.service}','netem',{delay:$('d${n.id}').value,jitter:$('j${n.id}').value,loss:$('l${n.id}').value})">Apply</button>
+        <button ${dis} ${up ? '' : 'disabled'} onclick="fault('${n.service}','netem-clear')">Clear</button></div>
+      </details>
+    </div>`;
+  }).join('');
+}
+
+function renderScenarios(s) {
+  const reasons = (s.flow && s.flow.rejectsByReason) || {};
+  $('scenarios').innerHTML = s.scenarios.map((c) => {
+    const now = reasons[c.expect] || 0;
+    if (c.active && scenBase[c.id] == null) scenBase[c.id] = now;
+    if (!c.active) delete scenBase[c.id];
+    const delta = c.active ? now - (scenBase[c.id] || 0) : 0;
+    const left = c.active && c.revertAt ? Math.max(0, Math.round((c.revertAt - s.now) / 1000)) : null;
+    return `<div class="sc ${c.active ? 'on' : ''}">
+      <div class="title">${esc(c.title)} ${c.active ? '<span class="badge" style="color:var(--warn);border-color:#7a5a14">on</span>' : ''}</div>
+      <div class="story">${esc(c.story)}</div>
+      <div class="foot">
+        ${c.active ? `<button onclick="post('/api/scenario',{id:'${c.id}',action:'undo'})">Undo</button>` : `<button class="primary" onclick="post('/api/scenario',{id:'${c.id}',action:'run'})">Trigger</button>`}
+        <span>${esc(c.expect)}${c.active ? ` <span class="count">+${fmtN(delta)}</span>` : ''}</span>
+        ${left != null ? `<span>auto-off ${left}s</span>` : ''}
+      </div></div>`;
+  }).join('');
+}
+
+function spark(p99, tps) {
+  const line = (arr, color, w) => {
+    if (arr.length < 2) return '';
+    const max = Math.max(...arr, 1);
+    const pts = arr.map((v, i) => (i / (arr.length - 1) * 300).toFixed(1) + ',' + (54 - (v / max) * 50).toFixed(1)).join(' ');
+    return `<polyline fill="none" stroke="${color}" stroke-width="${w}" points="${pts}"/>`;
+  };
+  $('spark').innerHTML = line(tps, '#3a4458', 1) + line(p99, '#6ea8ff', 1.6);
+}
+
+function render(s) {
+  const c = s.cluster, f = s.flow || {}, ld = s.load || {};
+  const cur = ((ld.stats || {}).recent) || {};
+  if (cur.p99us != null) lastRecent = cur;   // the venue's window resets every few seconds; keep the last reading
+  const recent = lastRecent;
+  const nodesUp = s.nodes.filter((n) => n.state === 'running').length;
+  const pc = $('p-cluster');
+  if (!s.monitorUp || !c) { pc.className = 'pill bad'; pc.textContent = 'waiting for cluster…'; }
+  else if (c.leader < 0) { pc.className = 'pill warn'; pc.textContent = 'electing a leader…'; }
+  else { pc.className = 'pill ok'; pc.textContent = 'leader node' + c.leader + ' · term ' + c.term; }
+  const pq = $('p-quorum'), run = s.dockerUp ? nodesUp : null;
+  if (run == null) { pq.textContent = ''; pq.className = 'pill'; pq.style.display = 'none'; }
+  else { pq.style.display = ''; pq.textContent = 'members up ' + run + '/' + (c ? c.size : 3); pq.className = 'pill ' + (run >= (c ? c.needed : 2) ? (run === (c ? c.size : 3) ? 'ok' : 'warn') : 'bad'); }
+  $('quorumwarn').style.display = (run != null && c && run < c.needed) ? 'block' : 'none';
+  if (s.blotterUrl) { $('blotter').href = s.blotterUrl; $('blotter').style.display = ''; }
+
+  $('k-tps').textContent = f.tradesPerSec != null ? f.tradesPerSec : '–'; $('k-trades').textContent = fmtN(f.trades) + ' total';
+  $('k-qps').textContent = f.quotesPerSec != null ? f.quotesPerSec : '–'; $('k-quotes').textContent = fmtN(f.quotes) + ' total';
+  $('k-hit').textContent = f.hitRatio != null ? (f.hitRatio * 100).toFixed(0) + '%' : '–';
+  $('k-rej').textContent = fmtN(f.rejects); $('k-notional').textContent = f.tradedNotional != null ? (f.tradedNotional / 1e6).toFixed(0) + 'mm traded' : '';
+  $('k-p99').textContent = fmtUs(recent.p99us); $('k-p50').textContent = 'p50 ' + fmtUs(recent.p50us);
+  $('k-fo').textContent = c ? c.leaderChanges : '–'; $('k-term').textContent = c ? 'term ' + c.term : '';
+
+  const slider = $('rate'); slider.max = ld.maxRate || 200;
+  if (!sliderDrag && ld.rate >= 0) { slider.value = ld.rate; $('rate-val').textContent = ld.rate; }
+  $('l-p50').textContent = fmtUs(recent.p50us); $('l-p99').textContent = fmtUs(recent.p99us);
+  $('l-p999').textContent = fmtUs(recent.p999us); $('l-max').textContent = fmtUs(recent.maxus);
+  if (recent.p99us != null) { p99Hist.push(recent.p99us); tpsHist.push(f.tradesPerSec || 0); }
+  if (p99Hist.length > 90) { p99Hist.shift(); tpsHist.shift(); }
+  spark(p99Hist, tpsHist);
+
+  renderNodes(s); renderScenarios(s);
+
+  $('reasons').innerHTML = Object.entries(f.rejectsByReason || {}).map(([k, v]) => `<span class="chip">${esc(k)} ${fmtN(v)}</span>`).join('') || '<span class="muted">no rejects yet</span>';
+  $('recent').innerHTML = (s.recent || []).map((e) => `<tr><td class="muted">${esc(e.time)}</td><td class="t-${esc(e.type)}">${esc(e.type)}</td><td>${e.client}</td><td>${esc(e.instrument)}</td><td class="${e.side === 'BUY' ? 'buy' : 'sell'}">${esc(e.side)}</td><td>${e.notional ? (e.notional / 1e6).toFixed(0) : ''}</td><td class="muted">${esc(e.detail)}</td></tr>`).join('');
+
+  const tl = $('tl'), atBottom = tl.scrollTop + tl.clientHeight >= tl.scrollHeight - 30;
+  tl.innerHTML = s.timeline.map((e) => `<div class="row ${e.kind === 'measure' ? 'measure' : ''}"><span class="time">${clock(e.t)}</span><span class="kind k-${esc(e.kind)}">${esc(e.kind)}</span><span class="text">${esc(e.text)}</span></div>`).join('')
+    || '<div class="muted">Nothing yet. Try crashing the leader.</div>';
+  if (atBottom) tl.scrollTop = tl.scrollHeight;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/state', {cache: 'no-store'});
+    if (r.ok) { last = await r.json(); render(last); }
+  } catch (e) { $('p-cluster').className = 'pill bad'; $('p-cluster').textContent = 'panel unreachable'; }
+}
+
+$('reset').onclick = () => post('/api/heal', {});
+document.querySelectorAll('[data-rps]').forEach((b) => b.onclick = () => post('/api/load', {rps: b.dataset.rps}));
+const slider = $('rate');
+slider.oninput = () => { sliderDrag = true; $('rate-val').textContent = slider.value; };
+slider.onchange = () => { post('/api/load', {rps: slider.value}); sliderDrag = false; };
+refresh(); setInterval(refresh, 700);
+</script>
+</body>
+</html>
